@@ -122,6 +122,14 @@ export interface FurnitureItem {
   locked?: boolean;
 }
 
+export interface Layout {
+  id: string;
+  name: string;
+  furnitureByFloor: Record<string, FurnitureItem[]>;
+}
+
+export type ComposedFloor = Floor & { furniture: FurnitureItem[] };
+
 export interface ElementGroup {
   id: string;
   elementIds: string[];
@@ -224,7 +232,6 @@ export interface Floor {
   rooms: Room[];
   doors: Door[];
   windows: Window[];
-  furniture: FurnitureItem[];
   stairs: Stair[];
   columns: Column[];
   backgroundImage?: BackgroundImage;
@@ -252,6 +259,9 @@ export interface CustomModelDef {
 }
 
 export interface Project {
+  schemaVersion: 1;
+  layouts: Layout[];
+  activeLayoutId: string;
   customModels?: CustomModelDef[];
   attachmentNames?: Record<string, string>;
   projectPackage?: ProjectPackageState;

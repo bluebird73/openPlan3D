@@ -14,57 +14,58 @@ const item = (updates: Partial<FurnitureItem> = {}): FurnitureItem => ({
   scale: { x: 1, y: 1, z: 1 }, width: 100, depth: 60, height: 80, color: '#2563eb', ...updates,
 });
 const wall: Wall = { id: 'wall', start: { x: 0, y: 0 }, end: { x: 600, y: 0 }, thickness: 20, height: 250, color: '#eee' };
+const furnitureFor = (project: any) => project.layouts[0].furnitureByFloor[project.floors[0].id] ??= [];
 
 it('furniture scaling preserves mirror signs and ignores invalid or unchanged values', () => {
   const project = roomProject();
-  project.floors[0].furniture = [item({ scale: { x: 1.5, y: -2, z: 3 } })];
+  furnitureFor(project).push(item({ scale: { x: 1.5, y: -2, z: 3 } }));
   currentProject.set(project);
-  const before = structuredClone(project.floors[0]);
+  const before = structuredClone(project);
   scaleFurniture('qa-chair', { x: -1.5, y: -2 });
-  const mirrored = structuredClone(get(currentProject)!.floors[0]);
-  expect(mirrored.furniture[0].scale).toEqual({ x: -1.5, y: -2, z: 3 });
-  undo(); expect(get(currentProject)!.floors[0]).toEqual(before);
+  const mirrored = structuredClone(get(currentProject)!);
+  expect(furnitureFor(mirrored)[0].scale).toEqual({ x: -1.5, y: -2, z: 3 });
+  undo(); expect(get(currentProject)).toEqual(before);
   scaleFurniture('qa-chair', { x: NaN, y: 2 });
   scaleFurniture('missing', { x: 2, y: 2 });
   scaleFurniture('qa-chair', { x: 1.5, y: -2 });
-  redo(); expect(get(currentProject)!.floors[0]).toEqual(mirrored);
+  redo(); expect(get(currentProject)).toEqual(mirrored);
   scaleFurniture('qa-chair', { x: -.01, y: .01 });
-  expect(get(currentProject)!.floors[0].furniture[0].scale).toEqual({ x: -.2, y: .2, z: 3 });
+  expect(furnitureFor(get(currentProject)!)[0].scale).toEqual({ x: -.2, y: .2, z: 3 });
 });
 
 it('furniture stacking preserves data and treats the existing end position as a history no-op', () => {
   const project = roomProject();
-  project.floors[0].furniture = [item({ id: 'a' }), item({ id: 'b' }), item({ id: 'c' })];
+  furnitureFor(project).push(item({ id: 'a' }), item({ id: 'b' }), item({ id: 'c' }));
   currentProject.set(project);
-  const before = structuredClone(project.floors[0]);
+  const before = structuredClone(project);
   reorderFurniture('a', 'front');
-  const front = structuredClone(get(currentProject)!.floors[0]);
-  expect(front).toEqual({ ...before, furniture: [before.furniture[1], before.furniture[2], before.furniture[0]] });
+  const front = structuredClone(get(currentProject)!);
+  expect(furnitureFor(front)).toEqual([furnitureFor(before)[1], furnitureFor(before)[2], furnitureFor(before)[0]]);
   reorderFurniture('a', 'front');
-  undo(); expect(get(currentProject)!.floors[0]).toEqual(before);
+  undo(); expect(get(currentProject)).toEqual(before);
   reorderFurniture('missing', 'front');
   reorderFurniture('a', 'back');
-  redo(); expect(get(currentProject)!.floors[0]).toEqual(front);
+  redo(); expect(get(currentProject)).toEqual(front);
   reorderFurniture('a', 'back');
-  expect(get(currentProject)!.floors[0]).toEqual(before);
-  undo(); expect(get(currentProject)!.floors[0]).toEqual(front);
+  expect(get(currentProject)).toEqual(before);
+  undo(); expect(get(currentProject)).toEqual(front);
 });
 
 it('unchanged furniture appearance and transforms preserve Undo and Redo', () => {
   const project = roomProject();
-  project.floors[0].furniture = [item()];
+  furnitureFor(project).push(item());
   currentProject.set(project);
-  const before = structuredClone(project.floors[0]);
-  const original = before.furniture[0];
+  const before = structuredClone(project);
+  const original = furnitureFor(before)[0];
   updateFurniture(original.id, { color: '#abcdef' });
-  const edited = structuredClone(get(currentProject)!.floors[0]);
+  const edited = structuredClone(get(currentProject)!);
   updateFurniture(original.id, { position: { ...original.position } });
   updateFurniture(original.id, { scale: { ...original.scale } });
-  undo(); expect(get(currentProject)!.floors[0]).toEqual(before);
+  undo(); expect(get(currentProject)).toEqual(before);
   updateFurniture(original.id, { color: original.color });
   updateFurniture('missing', { rotation: 45 });
   updateFurniture(original.id, {});
-  redo(); expect(get(currentProject)!.floors[0]).toEqual(edited);
+  redo(); expect(get(currentProject)).toEqual(edited);
 });
 
 const world = (point: Point, position: Point, rotation: number) => {
@@ -145,15 +146,15 @@ it('does not force furniture onto a shorter wall, a curved wall, or a distant wa
 
 it('a multi-frame mirrored resize is one undo step and keeps its exact final footprint', () => {
   const project = roomProject();
-  project.floors[0].furniture = [item({ scale: { x: -1, y: 1, z: 1 } })];
+  furnitureFor(project).push(item({ scale: { x: -1, y: 1, z: 1 } }));
   loadProject(project);
   beginUndoGroup();
   transformFurnitureDuringDrag('qa-chair', { position: { x: -20, y: 0 }, scale: { x: -0.6, y: 1, z: 1 } });
   transformFurnitureDuringDrag('qa-chair', { position: { x: -45, y: 0 }, scale: { x: -0.1, y: 1, z: 1 } });
   endUndoGroup('Resized furniture');
-  expect(getFurnitureSize(get(currentProject)!.floors[0].furniture[0]).width).toBe(10);
+  expect(getFurnitureSize(furnitureFor(get(currentProject)!)[0]).width).toBe(10);
   undo();
-  expect(get(currentProject)!.floors[0].furniture[0]).toMatchObject({ position: { x: 0, y: 0 }, scale: { x: -1, y: 1, z: 1 } });
+  expect(furnitureFor(get(currentProject)!)[0]).toMatchObject({ position: { x: 0, y: 0 }, scale: { x: -1, y: 1, z: 1 } });
   redo();
-  expect(get(currentProject)!.floors[0].furniture[0]).toMatchObject({ position: { x: -45, y: 0 }, scale: { x: -0.1, y: 1, z: 1 } });
+  expect(furnitureFor(get(currentProject)!)[0]).toMatchObject({ position: { x: -45, y: 0 }, scale: { x: -0.1, y: 1, z: 1 } });
 });

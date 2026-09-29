@@ -1,0 +1,30 @@
+Phase 4A-2A final working-diff manifest
+
+Runtime: Node v20.13.1 / npm 10.5.2
+
+Modified or added Phase 4A-2A files:
+- src/lib/models/types.ts
+- src/lib/stores/project.ts
+- src/lib/utils/projectValidation.ts
+- src/lib/utils/duplicateSelection.ts
+- tests/layout-migration.test.ts
+- tests/layout-project-store.test.ts
+- tests/project-validation.test.ts
+- tests/furniture-interactions.test.ts
+- LAYOUT_2A_REPORT.md
+- LAYOUT_2A_DIFF.txt
+
+Untouched required reference artifacts:
+- LAYOUT_CHANGE_MAP.md
+- docs/adr-layout-model.md
+
+Current tracked diff stat:
+ src/lib/models/types.ts              |  12 ++-
+ src/lib/stores/project.ts            | 174 ++++++++++++++++++++++++-----------
+ src/lib/utils/duplicateSelection.ts  |   8 +-
+ src/lib/utils/projectValidation.ts   |  71 +++++++++++---
+ tests/furniture-interactions.test.ts |  51 +++++-----
+ tests/project-validation.test.ts     |  21 +++--
+ 6 files changed, 232 insertions(+), 105 deletions(-)
+
+No Phase 4A-2B or 2C files were changed.

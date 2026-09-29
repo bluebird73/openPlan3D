@@ -1,12 +1,14 @@
-import type { Floor, Point } from '$lib/models/types';
+import type { Floor, FurnitureItem, Point } from '$lib/models/types';
+
+type FloorRead = Floor & { furniture?: FurnitureItem[] };
 
 /** Copy selected plan objects and openings carried by copied walls. Mutates floor only. */
-export function duplicatePlanSelection(floor: Floor, selected: ReadonlySet<string>, uid: () => string): string[] {
+export function duplicatePlanSelection(floor: FloorRead, selected: ReadonlySet<string>, uid: () => string): string[] {
   return pastePlanSelection(floor, floor, selected, uid);
 }
 
 /** Paste saved geometry into a destination floor without consulting live source objects. */
-export function pastePlanSelection(source: Floor, floor: Floor, selected: ReadonlySet<string>, uid: () => string, step = 1): string[] {
+export function pastePlanSelection(source: FloorRead, floor: FloorRead, selected: ReadonlySet<string>, uid: () => string, step = 1): string[] {
   const mapping = new Map<string, string>();
   const offset = (p: Point): Point => ({ x: p.x + 30 * step, y: p.y + 30 * step });
   for (const wall of [...source.walls]) {

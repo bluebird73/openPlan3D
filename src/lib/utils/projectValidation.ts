@@ -1,10 +1,12 @@
-import type { Project, DetailKind } from '$lib/models/types';
+import type { Project, DetailKind, FurnitureItem } from '$lib/models/types';
 import { validateItemDetails, validateRetainedDetailState } from './itemDetails';
 import { refreshLegacyFurnitureCategories } from './legacyFurnitureCategories';
 import { validateCustomModelDefinitions } from './customModelDefinitions';
 
 /** Read untrusted native files without mutating their input or the active editor. */
 export function readProject(value: unknown): Project {
+  const DEFAULT_LAYOUT_ID = 'layout-default';
+  const DEFAULT_LAYOUT_NAME = 'Default Layout';
   const fail = (path: string, reason: string): never => { throw new Error(`Invalid project: ${path} ${reason}.`); };
   const record = (value: any, path: string): Record<string, any> => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) fail(path, 'must be an object');
@@ -44,11 +46,37 @@ export function readProject(value: unknown): Project {
     if (!Array.isArray(value)) fail(path, 'must be an array');
     for (const [i, id] of value.entries()) text(id, `${path}[${i}]`, true);
   };
+  const positioned = (item: Record<string, any>, path: string) => {
+    point(item.position, `${path}.position`); defaults(item, { rotation: 0 }); number(item.rotation, `${path}.rotation`);
+  };
   let project: Record<string, any>;
   try { project = structuredClone(record(value, 'document')); }
   catch (error) {
     if (error instanceof Error && error.message.startsWith('Invalid project:')) throw error;
     fail('document', 'could not be read');
+  }
+  if (project.schemaVersion !== undefined && project.schemaVersion !== 1) {
+    if (typeof project.schemaVersion === 'number' && project.schemaVersion > 1) fail('schemaVersion', 'is newer than the supported version');
+    fail('schemaVersion', 'must be 1');
+  }
+  const legacy = project.schemaVersion === undefined;
+  const legacyFurniture = new Map<string, FurnitureItem[]>();
+  if (legacy) {
+    for (const floor of Array.isArray(project.floors) ? project.floors : []) {
+      if (Array.isArray(floor?.furniture) && floor.furniture.length) legacyFurniture.set(floor.id, floor.furniture);
+      if (floor && typeof floor === 'object') delete floor.furniture;
+    }
+    project.schemaVersion = 1;
+    project.layouts = [{ id: DEFAULT_LAYOUT_ID, name: DEFAULT_LAYOUT_NAME, furnitureByFloor: Object.fromEntries(legacyFurniture) }];
+    project.activeLayoutId = DEFAULT_LAYOUT_ID;
+  } else {
+    if (Array.isArray(project.floors)) for (const floor of project.floors) delete floor.furniture;
+    if (!Array.isArray(project.layouts) || project.layouts.length === 0) {
+      project.layouts = [{ id: DEFAULT_LAYOUT_ID, name: DEFAULT_LAYOUT_NAME, furnitureByFloor: {} }];
+    }
+    if (typeof project.activeLayoutId !== 'string' || !project.layouts.some((layout: any) => layout?.id === project.activeLayoutId)) {
+      project.activeLayoutId = project.layouts[0]?.id || DEFAULT_LAYOUT_ID;
+    }
   }
   text(project!.id, 'id', true);
   defaults(project!, { name: 'Untitled Project' });
@@ -82,9 +110,6 @@ export function readProject(value: unknown): Project {
         if (['walls', 'doors', 'windows', 'furniture', 'rooms'].includes(key) && item.details !== undefined) validateItemDetails(item.details, key as DetailKind);
       }
     };
-    const positioned = (item: Record<string, any>, path: string) => {
-      point(item.position, `${path}.position`); defaults(item, { rotation: 0 }); number(item.rotation, `${path}.rotation`);
-    };
     elements('walls', (wall, path) => {
       point(wall.start, `${path}.start`); point(wall.end, `${path}.end`);
       positive(wall.thickness, `${path}.thickness`);
@@ -109,15 +134,6 @@ export function readProject(value: unknown): Project {
         choice(opening.type, ['standard', 'fixed', 'casement', 'sliding', 'bay'], `${path}.type`);
         number(opening.sillHeight, `${path}.sillHeight`, 0);
       }
-    });
-    elements('furniture', (item, path) => {
-      if (item.customModelId !== undefined && (typeof item.customModelId !== 'string' || !customModelIds.has(item.customModelId))) fail(`${path}.customModelId`, 'must refer to a model in this project');
-      text(item.catalogId, `${path}.catalogId`, true); positioned(item, path);
-      defaults(item, { scale: { x: 1, y: 1, z: 1 } }); record(item.scale, `${path}.scale`);
-      // Mirroring uses negative scale. Do not normalize signs or round dimensions.
-      for (const key of ['x', 'y', 'z']) number(item.scale[key], `${path}.scale.${key}`);
-      for (const key of ['width', 'depth', 'height']) if (item[key] !== undefined) positive(item[key], `${path}.${key}`);
-      strings(item, ['color', 'material', 'sourceCategory'], path); booleans(item, ['locked'], path);
     });
     elements('stairs', (item, path) => {
       positioned(item, path); positive(item.width, `${path}.width`); positive(item.depth, `${path}.depth`);
@@ -161,6 +177,35 @@ export function readProject(value: unknown): Project {
       defaults(bg, { opacity: 0.4, locked: false }); number(bg.opacity, `${bgPath}.opacity`, 0, 1); booleans(bg, ['locked'], bgPath);
     }
   }
+  const furniture = (item: Record<string, any>, path: string) => {
+    if (item.customModelId !== undefined && (typeof item.customModelId !== 'string' || !customModelIds.has(item.customModelId))) fail(`${path}.customModelId`, 'must refer to a model in this project');
+    text(item.catalogId, `${path}.catalogId`, true); positioned(item, path);
+    defaults(item, { scale: { x: 1, y: 1, z: 1 } }); record(item.scale, `${path}.scale`);
+    for (const key of ['x', 'y', 'z']) number(item.scale[key], `${path}.scale.${key}`);
+    for (const key of ['width', 'depth', 'height']) if (item[key] !== undefined) positive(item[key], `${path}.${key}`);
+    strings(item, ['color', 'material', 'sourceCategory'], path); booleans(item, ['locked'], path);
+    if (item.details !== undefined) validateItemDetails(item.details, 'furniture');
+  };
+  const layoutIds = new Set<string>();
+  for (const [index, layout] of (project.layouts as any[]).entries()) {
+    const path = `layouts[${index}]`;
+    record(layout, path); text(layout.id, `${path}.id`, true); text(layout.name, `${path}.name`);
+    if (layoutIds.has(layout.id)) fail(`${path}.id`, 'duplicates another layout');
+    layoutIds.add(layout.id);
+    record(layout.furnitureByFloor, `${path}.furnitureByFloor`);
+    for (const [floorId, items] of Object.entries(layout.furnitureByFloor)) {
+      if (!floorIds.has(floorId)) fail(`${path}.furnitureByFloor.${floorId}`, 'must refer to a floor');
+      if (!Array.isArray(items)) fail(`${path}.furnitureByFloor.${floorId}`, 'must be an array');
+      const seen = new Set<string>();
+      for (const [i, item] of items.entries()) {
+        const itemPath = `${path}.furnitureByFloor.${floorId}[${i}]`;
+        record(item, itemPath); text(item.id, `${itemPath}.id`, true);
+        if (seen.has(item.id)) fail(`${itemPath}.id`, 'duplicates another furniture item on this floor');
+        seen.add(item.id); furniture(item, itemPath);
+      }
+    }
+  }
+  if (!layoutIds.has(project.activeLayoutId)) project.activeLayoutId = project.layouts[0].id;
   if (project!.activeFloorId !== undefined) text(project!.activeFloorId, 'activeFloorId');
   if (!floorIds.has(project!.activeFloorId)) project!.activeFloorId = floors[0].id;
   if (project!.customEntourage !== undefined) {

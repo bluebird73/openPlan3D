@@ -4,7 +4,7 @@ import { splitWallGeometry } from '$lib/utils/splitWallGeometry';
 import { wallPathProfile } from '$lib/utils/wallProfiles';
 import { duplicatePlanSelection, pastePlanSelection } from '$lib/utils/duplicateSelection';
 import { writable, derived, get } from 'svelte/store';
-import type { Project, Floor, Wall, Door, Window as Win, FurnitureItem, Point, Stair, Column, BackgroundImage, GuideLine, ElementGroup, EntourageItem } from '$lib/models/types';
+import type { Project, Floor, Wall, Door, Window as Win, FurnitureItem, Point, Stair, Column, BackgroundImage, GuideLine, ElementGroup, EntourageItem, Layout, ComposedFloor } from '$lib/models/types';
 import { planWallResize, finitePoint, validPositiveDimension, validOpeningPosition, type WallEndpoint } from '$lib/utils/wallEditing';
 import { getOuterWalls } from '$lib/utils/outerWalls';
 import { nextFloorLevel, floorElevations, validFloorElevation, DEFAULT_FLOOR_SPACING } from '$lib/utils/floors';
@@ -20,7 +20,7 @@ function uid(): string {
 
 export function createDefaultFloor(level = 0): Floor {
   const id = uid();
-  return { id, name: level === 0 ? 'Ground Floor' : `Floor ${level}`, level, walls: [], rooms: [], doors: [], windows: [], furniture: [], stairs: [], columns: [], guides: [], measurements: [], annotations: [], textAnnotations: [], groups: [] };
+  return { id, name: level === 0 ? 'Ground Floor' : `Floor ${level}`, level, walls: [], rooms: [], doors: [], windows: [], stairs: [], columns: [], guides: [], measurements: [], annotations: [], textAnnotations: [], groups: [] };
 }
 
 export function createDefaultProject(name = 'Untitled Project'): Project {
@@ -30,6 +30,9 @@ export function createDefaultProject(name = 'Untitled Project'): Project {
     name,
     floors: [floor],
     activeFloorId: floor.id,
+    schemaVersion: 1,
+    layouts: [{ id: 'layout-default', name: 'Default Layout', furnitureByFloor: {} }],
+    activeLayoutId: 'layout-default',
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -37,10 +40,21 @@ export function createDefaultProject(name = 'Untitled Project'): Project {
 
 export const currentProject = writable<Project | null>(null);
 
+export function getActiveLayout(project = get(currentProject)): Layout | null {
+  return project?.layouts.find(layout => layout.id === project.activeLayoutId) ?? project?.layouts[0] ?? null;
+}
+
+export function getFurnitureForFloor(project: Project | null, floorId: string): FurnitureItem[] {
+  return getActiveLayout(project)?.furnitureByFloor[floorId] ?? [];
+}
+
 export const activeFloor = derived(currentProject, ($p) => {
   if (!$p) return null;
-  return $p.floors.find((f) => f.id === $p.activeFloorId) ?? $p.floors[0] ?? null;
+  const floor = $p.floors.find((f) => f.id === $p.activeFloorId) ?? $p.floors[0];
+  return floor ? { ...floor, furniture: getFurnitureForFloor($p, floor.id) } as ComposedFloor : null;
 });
+
+export const activeLayout = derived(currentProject, ($p) => getActiveLayout($p));
 
 export type Tool = 'select' | 'wall' | 'door' | 'window' | 'furniture' | 'text' | 'measure' | 'annotate';
 export const selectedTool = writable<Tool>('select');
@@ -196,6 +210,9 @@ function clearFloorContext() {
 
 function restoreHistoryProject(state: string) {
   const project = reviveDates(JSON.parse(state));
+  const activeLayoutId = get(currentProject)?.activeLayoutId;
+  if (activeLayoutId && project.layouts?.some((layout: Layout) => layout.id === activeLayoutId)) project.activeLayoutId = activeLayoutId;
+  else if (project.layouts?.length) project.activeLayoutId = project.layouts[0].id;
   if (get(currentProject)?.activeFloorId !== project.activeFloorId) clearFloorContext();
   currentProject.set(project);
 }
@@ -251,6 +268,27 @@ function mutate(fn: (floor: Floor) => void, description?: string, coalesceKey?: 
   fn(floor);
   p.updatedAt = new Date();
   currentProject.set({ ...p });
+}
+
+function mutateFurniture(fn: (items: FurnitureItem[]) => void, description?: string, coalesceKey?: string) {
+  const p = get(currentProject), layout = getActiveLayout(p), floorId = p?.activeFloorId;
+  if (!p || !layout || !floorId) return;
+  snapshot(description, coalesceKey);
+  const items = layout.furnitureByFloor[floorId] ?? (layout.furnitureByFloor[floorId] = []);
+  fn(items);
+  p.updatedAt = new Date();
+  currentProject.set({ ...p });
+}
+
+export function setActiveLayout(layoutId: string) {
+  const p = get(currentProject);
+  if (!p || !p.layouts.some(layout => layout.id === layoutId) || p.activeLayoutId === layoutId) return false;
+  undoGroupDepth = 0;
+  undoGroupSnapshot = null;
+  resetCoalescing();
+  p.activeLayoutId = layoutId;
+  currentProject.set({ ...p });
+  return true;
 }
 
 export function addWall(start: Point, end: Point): string {
@@ -312,9 +350,7 @@ export function addWindow(wallId: string, position: number, windowType: import('
 
 export function addFurniture(catalogId: string, position: Point): string {
   const id = uid();
-  mutate((f) => {
-    f.furniture.push({ id, catalogId, position, rotation: 0, scale: { x: 1, y: 1, z: 1 } });
-  }, `Added ${catalogId}`);
+  mutateFurniture(items => items.push({ id, catalogId, position, rotation: 0, scale: { x: 1, y: 1, z: 1 } }), `Added ${catalogId}`);
   if (typeof window !== 'undefined') {
     import('$lib/stores/onboarding.svelte').then(m => m.triggerTip('first-furniture', position.x + 20, position.y + 20)).catch(() => {});
   }
@@ -322,7 +358,9 @@ export function addFurniture(catalogId: string, position: Point): string {
 }
 
 /** Snapshot the current state before a drag begins (call once at drag start) */
+let interactionLayoutId: string | null = null;
 export function beginDrag(description = 'Moved element') {
+  interactionLayoutId = get(currentProject)?.activeLayoutId ?? null;
   snapshot(description);
 }
 
@@ -331,9 +369,8 @@ export function beginDrag(description = 'Moved element') {
 export function moveFurniture(id: string, position: Point) {
   const p = get(currentProject);
   if (!p) return;
-  const floor = p.floors.find((f) => f.id === p.activeFloorId);
-  if (!floor) return;
-  const item = floor.furniture.find((fi) => fi.id === id);
+  if (interactionLayoutId && interactionLayoutId !== p.activeLayoutId) return;
+  const item = getFurnitureForFloor(p, p.activeFloorId).find((fi) => fi.id === id);
   if (item) {
     item.position = position;
     p.updatedAt = new Date();
@@ -344,8 +381,8 @@ export function moveFurniture(id: string, position: Point) {
 /** Apply one drag frame atomically. The canvas owns the enclosing undo group. */
 export function transformFurnitureDuringDrag(id: string, updates: Partial<Pick<FurnitureItem, 'position' | 'rotation' | 'scale'>>) {
   const p = get(currentProject);
-  const floor = p?.floors.find(f => f.id === p.activeFloorId);
-  const item = floor?.furniture.find(fi => fi.id === id);
+  if (p && interactionLayoutId && interactionLayoutId !== p.activeLayoutId) return;
+  const item = p ? getFurnitureForFloor(p, p.activeFloorId).find(fi => fi.id === id) : undefined;
   if (!p || !item) return;
   Object.assign(item, updates);
   p.updatedAt = new Date();
@@ -364,32 +401,43 @@ export function rotateSelection(ids: ReadonlySet<string>, degrees = 15) {
   if (!project || !floor) return;
   const updates = selectionRotation(floor,ids,degrees,project.customEntourage);
   if (!updates.size) return;
-  mutate(f => {
-    for (const item of [...f.furniture,...f.stairs ?? [],...f.columns ?? [],...f.entourage ?? []]) {
-      const update = updates.get(item.id);
-      if (update) Object.assign(item,update);
-    }
-    for (const item of f.textAnnotations ?? []) {
-      const update = updates.get(item.id);
-      if (update) Object.assign(item, { x:update.position.x,y:update.position.y,rotation:update.rotation });
-    }
-    for (const item of [...f.measurements ?? [],...f.annotations ?? []]) {
-      const update = updates.get(item.id);
-      if (update?.endpoints) Object.assign(item,update.endpoints);
-    }
-  }, 'Rotated selection');
+  beginUndoGroup();
+  try {
+    mutateFurniture(items => {
+      for (const item of items) {
+        const update = updates.get(item.id);
+        if (update) Object.assign(item,update);
+      }
+    }, 'Rotated selection');
+    mutate(f => {
+      for (const item of [...f.stairs ?? [],...f.columns ?? [],...f.entourage ?? []]) {
+        const update = updates.get(item.id);
+        if (update) Object.assign(item,update);
+      }
+      for (const item of f.textAnnotations ?? []) {
+        const update = updates.get(item.id);
+        if (update) Object.assign(item, { x:update.position.x,y:update.position.y,rotation:update.rotation });
+      }
+      for (const item of [...f.measurements ?? [],...f.annotations ?? []]) {
+        const update = updates.get(item.id);
+        if (update?.endpoints) Object.assign(item,update.endpoints);
+      }
+    }, 'Rotated selection');
+  } finally {
+    endUndoGroup('Rotated selection');
+  }
 }
 
 export function rotateFurniture(id: string, angle: number) {
-  mutate((f) => {
-    const item = f.furniture.find((fi) => fi.id === id);
+  mutateFurniture((items) => {
+    const item = items.find((fi) => fi.id === id);
     if (item) item.rotation = (item.rotation + angle) % 360;
   }, 'Rotated furniture');
 }
 
 export function setFurnitureRotation(id: string, angle: number) {
-  mutate((f) => {
-    const item = f.furniture.find((fi) => fi.id === id);
+  mutateFurniture((items) => {
+    const item = items.find((fi) => fi.id === id);
     if (item) item.rotation = ((angle % 360) + 360) % 360;
   });
 }
@@ -408,16 +456,14 @@ export function reorderFurniture(id: string, destination: 'front' | 'back') {
   const index = furniture.findIndex(item => item.id === id);
   const target = destination === 'front' ? furniture.length - 1 : 0;
   if (index < 0 || index === target) return;
-  mutate(floor => {
-    const [item] = floor.furniture.splice(index, 1);
-    floor.furniture.splice(target, 0, item);
+  mutateFurniture(items => {
+    const [item] = items.splice(index, 1);
+    items.splice(target, 0, item);
   }, destination === 'front' ? 'Brought furniture to front' : 'Sent furniture to back');
 }
 
 export function removeFurniture(id: string) {
-  mutate((f) => {
-    f.furniture = f.furniture.filter((fi) => fi.id !== id);
-  }, 'Deleted furniture');
+  mutateFurniture(items => { const index = items.findIndex(fi => fi.id === id); if (index >= 0) items.splice(index, 1); }, 'Deleted furniture');
 }
 
 // Stairs
@@ -599,6 +645,11 @@ export function removeRoom(id: string) {
 }
 
 export function removeElement(id: string) {
+  beginUndoGroup();
+  mutateFurniture(items => {
+    const index = items.findIndex(item => item.id === id);
+    if (index >= 0) items.splice(index, 1);
+  }, 'Deleted element');
   mutate((f) => {
     // Check if the element being removed is a wall — if so, also remove associated doors/windows
     const isWall = f.walls.some((w) => w.id === id);
@@ -614,7 +665,6 @@ export function removeElement(id: string) {
     }
     f.doors = f.doors.filter((d) => d.id !== id);
     f.windows = f.windows.filter((w) => w.id !== id);
-    f.furniture = f.furniture.filter((fi) => fi.id !== id);
     if (f.stairs) f.stairs = f.stairs.filter((s) => s.id !== id);
     if (f.columns) f.columns = f.columns.filter((c) => c.id !== id);
     if (f.textAnnotations) f.textAnnotations = f.textAnnotations.filter((t) => t.id !== id);
@@ -623,6 +673,7 @@ export function removeElement(id: string) {
     if (f.entourage) f.entourage = f.entourage.filter((e) => e.id !== id);
     if (f.groups) f.groups = f.groups.map(group => ({ ...group, elementIds: group.elementIds.filter(itemId => !removedIds.has(itemId)) })).filter(group => group.elementIds.length >= 2);
   }, 'Deleted element');
+  endUndoGroup('Deleted element');
 }
 
 /** Move a wall endpoint without creating an undo snapshot (for dragging) */
@@ -775,8 +826,8 @@ export function updateFurniture(id: string, updates: Partial<FurnitureItem>) {
     }
     return item[key as keyof FurnitureItem] === updates[key as keyof FurnitureItem];
   })) return;
-  mutate((f) => {
-    const fi = f.furniture.find((fi) => fi.id === id);
+  mutateFurniture((items) => {
+    const fi = items.find((fi) => fi.id === id);
     if (fi) Object.assign(fi, updates);
   }, undefined, coalesceKeyFor('furniture', id, updates));
 }
@@ -945,8 +996,8 @@ export function loadProject(project: Project) {
   syncHistoryStore();
 }
 
-/** Import a floor's data into the current project's active floor (replaces walls/doors/windows/furniture) */
-export function importFloorIntoCurrentProject(floor: import('$lib/models/types').Floor) {
+/** Import a floor's data into the current project's active floor. */
+export function importFloorIntoCurrentProject(floor: import('$lib/models/types').Floor & { furniture?: FurnitureItem[] }) {
   const p = get(currentProject);
   if (!p) return;
   snapshot('Imported floor');
@@ -958,7 +1009,11 @@ export function importFloorIntoCurrentProject(floor: import('$lib/models/types')
   existing.walls = [...existing.walls, ...floor.walls];
   existing.doors = [...existing.doors, ...floor.doors];
   existing.windows = [...existing.windows, ...floor.windows];
-  existing.furniture = [...existing.furniture, ...floor.furniture];
+  const layout = getActiveLayout(p);
+  if (layout && floor.furniture?.length) {
+    const items = layout.furnitureByFloor[existing.id] ?? (layout.furnitureByFloor[existing.id] = []);
+    items.push(...floor.furniture);
+  }
   if (floor.stairs) existing.stairs = [...(existing.stairs || []), ...floor.stairs];
   if (floor.columns) existing.columns = [...(existing.columns || []), ...floor.columns];
   currentProject.set({ ...p });
@@ -1014,7 +1069,13 @@ export function duplicateSelection(ids: ReadonlySet<string>): string[] {
   if (!floor || !ids.size) return [];
   const copy = structuredClone(floor);
   const newIds = duplicatePlanSelection(copy, ids, uid);
-  if (newIds.length) mutate(f => Object.assign(f, copy), 'Duplicated selection');
+  if (newIds.length) {
+    const { furniture, ...structural } = copy;
+    beginUndoGroup();
+    mutate(f => Object.assign(f, structural), 'Duplicated selection');
+    mutateFurniture(items => { items.splice(0, items.length, ...furniture); }, 'Duplicated selection');
+    endUndoGroup('Duplicated selection');
+  }
   return newIds;
 }
 
@@ -1024,7 +1085,13 @@ export function pasteSelection(source: Floor, ids: ReadonlySet<string>, step = 1
   if (!floor) return [];
   const copy = structuredClone(floor);
   const newIds = pastePlanSelection(source, copy, ids, uid, step);
-  if (newIds.length) mutate(f => Object.assign(f, copy), 'Pasted selection');
+  if (newIds.length) {
+    const { furniture, ...structural } = copy;
+    beginUndoGroup();
+    mutate(f => Object.assign(f, structural), 'Pasted selection');
+    mutateFurniture(items => { items.splice(0, items.length, ...furniture); }, 'Pasted selection');
+    endUndoGroup('Pasted selection');
+  }
   return newIds;
 }
 
@@ -1032,14 +1099,10 @@ export function pasteSelection(source: Floor, ids: ReadonlySet<string>, step = 1
 export function duplicateFurniture(id: string): string | null {
   const p = get(currentProject);
   if (!p) return null;
-  const floor = p.floors.find(f => f.id === p.activeFloorId);
-  if (!floor) return null;
-  const fi = floor.furniture.find(fi => fi.id === id);
+  const fi = getFurnitureForFloor(p, p.activeFloorId).find(fi => fi.id === id);
   if (!fi) return null;
   const newId = uid();
-  mutate(f => {
-    f.furniture.push({ ...fi, id: newId, position: { x: fi.position.x + 30, y: fi.position.y + 30 } });
-  });
+  mutateFurniture(items => items.push({ ...fi, id: newId, position: { x: fi.position.x + 30, y: fi.position.y + 30 } }), 'Duplicated furniture');
   return newId;
 }
 
@@ -1289,23 +1352,26 @@ export function toggleSelectionLock(ids: ReadonlySet<string>) {
   const items = [...floor.furniture, ...floor.entourage ?? []].filter(item => ids.has(item.id));
   if (!items.length) return;
   const locked = items.some(item => !item.locked);
+  beginUndoGroup();
+  mutateFurniture(items => { for (const item of items) if (ids.has(item.id)) item.locked = locked; }, locked ? 'Locked selection' : 'Unlocked selection');
   mutate(f => {
-    for (const item of [...f.furniture, ...f.entourage ?? []]) {
+    for (const item of [...f.entourage ?? []]) {
       if (ids.has(item.id)) item.locked = locked;
     }
   }, locked ? 'Locked selection' : 'Unlocked selection');
+  endUndoGroup(locked ? 'Locked selection' : 'Unlocked selection');
 }
 
 export function toggleFurnitureLock(id: string) {
-  mutate((f) => {
-    const fi = f.furniture.find((fi) => fi.id === id);
+  mutateFurniture((items) => {
+    const fi = items.find((fi) => fi.id === id);
     if (fi) fi.locked = !fi.locked;
   });
 }
 
 export function setFurnitureLocked(id: string, locked: boolean) {
-  mutate((f) => {
-    const fi = f.furniture.find((fi) => fi.id === id);
+  mutateFurniture((items) => {
+    const fi = items.find((fi) => fi.id === id);
     if (fi) fi.locked = locked;
   });
 }
