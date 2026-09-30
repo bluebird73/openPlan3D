@@ -42,7 +42,10 @@ it('preserves iOS floors, exact wall geometry, thickness, heights and identifier
       expect(wall[endpoint].y).toBeCloseTo(expected[endpoint].y * 100, 8);
     }
   }
-  expect(createProjectFromRoomPlan(capture(), 'Imported').floors).toHaveLength(3);
+  const project = createProjectFromRoomPlan(capture(), 'Imported');
+  expect(project.floors).toHaveLength(3);
+  expect(project.floors.every(floor => !('furniture' in floor))).toBe(true);
+  for (const floor of project.floors) expect(project.layouts[0].furnitureByFloor[floor.id] ?? []).toEqual(floors.find(item => item.level === floor.level)!.furniture);
 });
 
 it('preserves opening styles, fractional dimensions, sill heights and door orientation', () => {

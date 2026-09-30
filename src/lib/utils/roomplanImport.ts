@@ -878,7 +878,7 @@ export function createProjectFromRoomPlan(
     target.rooms = floor.rooms;
     target.doors = floor.doors;
     target.windows = floor.windows;
-    target.furniture = floor.furniture;
+    project.layouts[0].furnitureByFloor[target.id] = floor.furniture;
     target.stairs = floor.stairs ?? [];
     target.columns = floor.columns ?? [];
     return target;

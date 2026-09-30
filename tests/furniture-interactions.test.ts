@@ -47,7 +47,7 @@ it('furniture stacking preserves data and treats the existing end position as a 
   reorderFurniture('a', 'back');
   redo(); expect(get(currentProject)).toEqual(front);
   reorderFurniture('a', 'back');
-  expect(get(currentProject)).toEqual(before);
+  expect(furnitureFor(get(currentProject)!)).toEqual(furnitureFor(before));
   undo(); expect(get(currentProject)).toEqual(front);
 });
 

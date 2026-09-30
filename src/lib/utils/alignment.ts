@@ -1,5 +1,5 @@
 import { get } from 'svelte/store';
-import { activeFloor, currentProject, beginUndoGroup, endUndoGroup } from '$lib/stores/project';
+import { activeFloor, currentProject, beginUndoGroup, endUndoGroup, updateFurniture } from '$lib/stores/project';
 import { openingAlignmentPosition } from './openingAlignment';
 import { openingPlanBounds } from './openingPlanBounds';
 import { wallPointAt } from './canvasRenderer';
@@ -88,10 +88,12 @@ export function alignElements(ids: Set<string>, op: AlignmentOp, context?: Canva
   const updates = planAlignment(floor,ids,op,p.customEntourage,measurementContext,get(projectSettings).units);
   if (!updates.size) return;
   beginUndoGroup();
+  const furnitureIds = new Set(floor.furniture.map(item => item.id));
   for (const item of alignmentItems(floor,ids)) {
     const pos = updates.get(item.id);
     if (!pos) continue;
-    if ('wallId' in item) { if (pos.openingPosition !== undefined) item.position = pos.openingPosition; }
+    if (furnitureIds.has(item.id)) updateFurniture(item.id, { position: pos });
+    else if ('wallId' in item) { if (pos.openingPosition !== undefined) item.position = pos.openingPosition; }
     else if ('position' in item) item.position = pos;
     else if ('start' in item) {
       const dx=pos.x-item.start.x, dy=pos.y-item.start.y;

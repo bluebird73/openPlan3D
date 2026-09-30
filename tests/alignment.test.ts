@@ -24,6 +24,7 @@ it.each(['align-left','align-right','align-top','align-bottom','align-center-h',
 });
 it.each(['distribute-h','distribute-v'] as AlignmentOp[])('%s spaces centers between fixed endpoints and locked anchors', op => {
   const floor = createDefaultProject().floors[0];
+  floor.furniture = [];
   floor.entourage = [0,10,100,120,300].map((n,i)=>({id:String(i),defId:'person',position:{x:n,y:n},width:50,rotation:0,locked:i===2}));
   const updates = planAlignment(floor,new Set(['0','1','2','3','4']),op);
   expect([...updates.keys()]).toEqual(['1','3']);
@@ -38,7 +39,7 @@ it('leaves locked alignment anchors unchanged and skips insufficient or already 
   expect(planAlignment(floor,new Set(['f','e']),'align-left',defs).size).toBe(0);
 });
 it('aligns in one undoable action without adding history for an insufficient selection', () => {
-  const project=createDefaultProject(); project.floors[0]=fixture();project.activeFloorId=project.floors[0].id;project.customEntourage=defs;
+  const project=createDefaultProject(), populated=fixture(); project.floors[0]={...populated,furniture:undefined} as Floor;project.layouts[0].furnitureByFloor[project.activeFloorId]=populated.furniture;project.customEntourage=defs;
   loadProject(project); const before=structuredClone(get(currentProject)!.floors[0]);
   alignElements(new Set(['f','s','e']),'align-left');const moved=structuredClone(get(currentProject)!.floors[0]);
   expect(moved).not.toEqual(before);
@@ -68,7 +69,7 @@ it.each(['align-left','align-right','align-top','align-bottom','align-center-h',
     expect({...b,x1:a.x1,x2:a.x2,y1:a.y1,y2:a.y2}).toEqual(a);
   }
   expect({...moved.textAnnotations![0],x:before.textAnnotations![0].x,y:before.textAnnotations![0].y}).toEqual(before.textAnnotations![0]);
-  const boxes=['textAnnotations','measurements','annotations'].map(key=>planContentBounds({...moved,
+  const boxes=['textAnnotations','measurements','annotations'].map(key=>planContentBounds({...moved,furniture:[],
     textAnnotations:key==='textAnnotations'?moved.textAnnotations:[],measurements:key==='measurements'?moved.measurements:[],annotations:key==='annotations'?moved.annotations:[],
   },{context:annotationContext,entourageAspect:()=>1})!);
   const values=boxes.map(b=>op==='align-left'?b.minX:op==='align-right'?b.maxX:op==='align-top'?b.minY:op==='align-bottom'?b.maxY:['align-center-h','distribute-h'].includes(op)?(b.minX+b.maxX)/2:(b.minY+b.maxY)/2);
@@ -141,13 +142,13 @@ it('selected hosts carry openings once and orphan openings do not enable alignme
  const project=createDefaultProject(),floor=project.floors[0];
  floor.walls=[{id:'w',start:{x:0,y:0},end:{x:1000,y:0},thickness:20,height:250,color:'#123456'}];
  floor.windows=[{id:'o',wallId:'w',position:.2,width:60,height:120,sillHeight:90,type:'standard'},{id:'orphan',wallId:'missing',position:.5,width:60,height:120,sillHeight:90,type:'standard'}];
- expect(alignmentItems(floor,new Set(['w','o','orphan'])).map(i=>i.id)).toEqual(['w']);
+ expect(alignmentItems({...floor,furniture:[]},new Set(['w','o','orphan'])).map(i=>i.id)).toEqual(['w']);
 });
 it('aligns an opening to a locked furniture anchor without changing unrelated data',()=>{
  const project=createDefaultProject(),floor=project.floors[0];
  floor.walls=[{id:'host',start:{x:0,y:0},end:{x:1000,y:0},thickness:20,height:250,color:'#123456'}];
  floor.windows=[{id:'o',wallId:'host',position:.2,width:60,height:120,sillHeight:90,type:'standard'}];
- floor.furniture=[{id:'anchor',catalogId:'chair',position:{x:700,y:0},rotation:0,width:60,depth:60,scale:{x:1,y:1,z:1},locked:true}];
+ project.layouts[0].furnitureByFloor[floor.id]=[{id:'anchor',catalogId:'chair',position:{x:700,y:0},rotation:0,width:60,depth:60,scale:{x:1,y:1,z:1},locked:true}];
  loadProject(project);const before=structuredClone(get(currentProject)!.floors[0]);
  alignElements(new Set(['o','anchor']),'align-right');
  const after=structuredClone(get(currentProject)!.floors[0]);
@@ -155,4 +156,20 @@ it('aligns an opening to a locked furniture anchor without changing unrelated da
  expect(after.windows[0].position).toBeCloseTo(.69425,6);
  expect({...after,windows:before.windows}).toEqual(before);
  undo();expect(get(currentProject)!.floors[0]).toEqual(before);
+});
+
+it('aligns active Layout furniture only and keeps the edit undoable',()=>{
+ const project=createDefaultProject(),floor=project.floors[0],floorId=floor.id;
+ const item=(id:string,x:number)=>({id,catalogId:'chair',position:{x,y:0},rotation:0,width:60,depth:60,scale:{x:1,y:1,z:1}});
+ project.layouts[0].furnitureByFloor[floorId]=[item('a',0),item('b',300)];
+ project.layouts.push({id:'alt',name:'Alternate',furnitureByFloor:{[floorId]:[item('other-a',0),item('other-b',600)]}});
+ loadProject(project);
+ alignElements(new Set(['a','b']),'align-left');
+ const moved=get(currentProject)!;
+ expect(moved.layouts[0].furnitureByFloor[floorId].map(item=>item.position.x)).toEqual([0,0]);
+ expect(moved.layouts[1].furnitureByFloor[floorId].map(item=>item.position.x)).toEqual([0,600]);
+ undo();
+ expect(get(currentProject)!.layouts[0].furnitureByFloor[floorId].map(item=>item.position.x)).toEqual([0,300]);
+ redo();
+ expect(get(currentProject)!.layouts[0].furnitureByFloor[floorId].map(item=>item.position.x)).toEqual([0,0]);
 });

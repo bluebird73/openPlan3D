@@ -9,7 +9,7 @@ export function removeCustomModel(project: Project, id: string): Project {
   const next = readProject(project);
   const model = next.customModels?.find(model => model.id === id);
   if (!model) throw new Error('This custom model is no longer defined in the project.');
-  if (next.floors.some(floor => floor.furniture.some(item => item.customModelId === id))) {
+  if (next.layouts.some(layout => Object.values(layout.furnitureByFloor).some(items => items.some(item => item.customModelId === id)))) {
     throw new Error('Remove this model’s placed furniture before removing its definition.');
   }
   next.customModels = next.customModels!.filter(model => model.id !== id);
@@ -25,9 +25,10 @@ export function placeCustomModel(project: Project, id: string, position: { x: nu
   const next = readProject(project);
   const model = next.customModels?.find(model => model.id === id);
   const floor = next.floors.find(floor => floor.id === next.activeFloorId);
-  if (!model || !floor) throw new Error('This custom model or floor is no longer available.');
+  const layout = next.layouts.find(layout => layout.id === next.activeLayoutId);
+  if (!model || !floor || !layout) throw new Error('This custom model or floor is no longer available.');
   if (![position.x, position.y].every(value => Number.isFinite(value) && Math.abs(value) <= 1_000_000)) throw new Error('Choose a position inside the supported plan area.');
-  floor.furniture.push({ id: crypto.randomUUID(), catalogId: 'custom-model', customModelId: id,
+  (layout.furnitureByFloor[floor.id] ??= []).push({ id: crypto.randomUUID(), catalogId: 'custom-model', customModelId: id,
     position: { ...position }, rotation: 0, scale: { x: 1, y: 1, z: 1 },
     width: model.width, depth: model.depth, height: model.height });
   return readProject(next);

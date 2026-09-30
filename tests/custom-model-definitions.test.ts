@@ -17,9 +17,9 @@ const definition: CustomModelDef = { id: 'fixture-model', name: 'Fixture box', a
 function modelProject() {
   const project = roomProject();
   project.customModels = [structuredClone(definition)];
-  project.floors[0].furniture.push({ id: 'fixture-instance', catalogId: 'imported_object', customModelId: definition.id,
+  project.layouts[0].furnitureByFloor[project.floors[0].id] = [{ id: 'fixture-instance', catalogId: 'imported_object', customModelId: definition.id,
     sourceCategory: 'Fixture box', position: { x: 200, y: 100 }, rotation: 0, scale: { x: 1, y: 1, z: 1 },
-    width: 100, depth: 75, height: 50 });
+    width: 100, depth: 75, height: 50 }];
   const { plan, mapping } = webToNative(project, undefined);
   project.projectPackage = { version: 1, furnitureCategoriesVersion: 1, native: plan, mapping,
     assets: { [`assets/${definition.assetName}`]: bytes.toString('base64') } };
@@ -30,7 +30,7 @@ it('preserves definitions, provenance, dimensions and furniture references throu
   const project = modelProject(), before = structuredClone(project);
   const reopened = readProjectPackage(projectPackageBytes(project)).project;
   expect(reopened.customModels).toEqual([definition]);
-  expect(reopened.floors[0].furniture.find(item => item.id === 'fixture-instance')).toMatchObject({
+  expect(reopened.layouts[0].furnitureByFloor[reopened.floors[0].id].find(item => item.id === 'fixture-instance')).toMatchObject({
     customModelId: definition.id, width: 100, depth: 75, height: 50,
   });
   expect(reopened.projectPackage!.assets[`assets/${definition.assetName}`]).toBe(bytes.toString('base64'));
@@ -54,14 +54,14 @@ it('rejects malformed definitions, unsafe provenance URLs and unresolved referen
   expect(() => readProject(duplicate)).toThrow('unique');
   const missing = modelProject(); missing.projectPackage!.assets = {};
   expect(() => readProject(missing)).toThrow('attachment is missing');
-  const dangling = modelProject(); dangling.floors[0].furniture.at(-1)!.customModelId = 'missing';
+  const dangling = modelProject(); dangling.layouts[0].furnitureByFloor[dangling.floors[0].id].at(-1)!.customModelId = 'missing';
   expect(() => readProject(dangling)).toThrow('must refer to a model');
 });
 it('protects original bytes while a model definition exists, including unplaced library models', () => {
   const project = modelProject();
   expect(usedPhotoNames(project).has(definition.assetName)).toBe(true);
   expect(() => deleteUnusedPhoto(project, definition.assetName)).toThrow('custom model');
-  project.floors[0].furniture = project.floors[0].furniture.filter(item => !item.customModelId);
+  project.layouts[0].furnitureByFloor[project.floors[0].id] = [];
   expect(usedPhotoNames(project).has(definition.assetName)).toBe(true);
   expect(() => deleteUnusedPhoto(project, definition.assetName)).toThrow('custom model');
   project.customModels = [];
@@ -73,13 +73,15 @@ it('refuses model removal while furniture uses it, including on another floor', 
   const project = modelProject(), before = structuredClone(project);
   expect(() => removeCustomModel(project, definition.id)).toThrow('placed furniture');
   expect(project).toEqual(before);
+  const instance = structuredClone(project.layouts[0].furnitureByFloor[project.floors[0].id][0]);
   const another = structuredClone(project.floors[0]); another.id = 'another-floor'; another.level = 1;
-  project.floors.push(another); project.floors[0].furniture = [];
+  project.floors.push(another); project.layouts[0].furnitureByFloor[project.floors[0].id] = [];
+  project.layouts[0].furnitureByFloor[another.id] = [instance];
   expect(() => removeCustomModel(project, definition.id)).toThrow('placed furniture');
 });
 
 it('removes an unused definition and source without mutating the previous project', () => {
-  const project = modelProject(); project.floors[0].furniture = [];
+  const project = modelProject(); project.layouts[0].furnitureByFloor[project.floors[0].id] = [];
   project.attachmentNames = { [definition.assetName]: 'Original model' };
   const before = structuredClone(project), next = removeCustomModel(project, definition.id);
   expect(next.customModels).toBeUndefined();
@@ -90,7 +92,7 @@ it('removes an unused definition and source without mutating the previous projec
 });
 
 it('retains original bytes while another model definition shares the attachment', () => {
-  const project = modelProject(); project.floors[0].furniture = [];
+  const project = modelProject(); project.layouts[0].furnitureByFloor[project.floors[0].id] = [];
   project.customModels!.push({ ...definition, id: 'second-model', name: 'Second definition' });
   const next = removeCustomModel(project, definition.id);
   expect(next.customModels!.map(model => model.id)).toEqual(['second-model']);
@@ -99,7 +101,7 @@ it('retains original bytes while another model definition shares the attachment'
 
 it('retains an attachment also referenced by item metadata', () => {
   const project = modelProject();
-  const item = project.floors[0].furniture.find(item => item.customModelId === definition.id)!;
+  const item = project.layouts[0].furnitureByFloor[project.floors[0].id].find(item => item.customModelId === definition.id)!;
   delete item.customModelId; item.details = { photos: [definition.assetName] };
   const next = removeCustomModel(project, definition.id);
   expect(next.customModels).toBeUndefined();
