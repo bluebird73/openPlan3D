@@ -14,7 +14,7 @@
   import { base } from '$app/paths';
   import { orderedFloors } from '$lib/utils/floors';
   import type { FloorSeed } from '$lib/stores/project';
-  import { currentProject, viewMode, undo, redo, addFloor, removeFloor, setActiveFloor, updateProjectName, createDefaultProject, snapEnabled, canvasZoom, canvasMinimumZoom, panMode, showFurnitureStore, layerVisibility, activeFloor, selectedElementId, elevationWallId, elevationPickMode } from '$lib/stores/project';
+  import { currentProject, viewMode, undo, redo, addFloor, removeFloor, setActiveFloor, updateProjectName, createDefaultProject, createLayout, setActiveLayout, snapEnabled, canvasZoom, canvasMinimumZoom, panMode, showFurnitureStore, layerVisibility, activeFloor, selectedElementId, elevationWallId, elevationPickMode } from '$lib/stores/project';
   import { get } from 'svelte/store';
   import type { Floor } from '$lib/models/types';
   import { exportAsJSON, exportAsSVG } from '$lib/utils/export';
@@ -118,6 +118,11 @@
   function onRemoveFloor(id: string) {
     if (floors.length <= 1) return;
     removeFloor(id);
+  }
+
+  function onCreateLayout() {
+    createLayout();
+    moreOpen = false;
   }
 
   async function save() {
@@ -371,6 +376,14 @@
     <span class="text-white/40 text-[10px] ml-1">{floors.length}F</span>
   </div>
 
+  <div class="flex items-center gap-1 max-xl:hidden">
+    <select aria-label={$t('layouts.current')} value={$currentProject?.activeLayoutId ?? ''} onchange={(e) => setActiveLayout(e.currentTarget.value)}
+      class="w-32 rounded bg-slate-700 px-2 py-1 text-xs text-white">
+      {#each $currentProject?.layouts ?? [] as layout (layout.id)}<option value={layout.id}>{layout.name}</option>{/each}
+    </select>
+    <button class="px-1.5 py-0.5 text-xs text-white/80 hover:text-white hover:bg-white/10 rounded" aria-label={$t('layouts.create')} title={$t('layouts.create')} onclick={onCreateLayout}>+</button>
+  </div>
+
   <div class="flex-1"></div>
 
   <button onclick={undo} class="p-1.5 text-white/80 hover:text-white hover:bg-white/10 rounded transition-colors" title={$t('projectToolbar.undoHint')} aria-label={$t('projectToolbar.undo')}>
@@ -512,6 +525,14 @@
     </button>
     {#if moreOpen}
       <div class="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-gray-200 py-1 w-56 z-50 max-h-[70vh] overflow-y-auto">
+        <div class="px-3 pt-1.5 pb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">{$t('layouts.title')}</div>
+        {#each $currentProject?.layouts ?? [] as layout (layout.id)}
+          <button class="w-full px-3 py-2 text-sm hover:bg-gray-100 text-left {layout.id === $currentProject?.activeLayoutId ? 'text-blue-600 font-semibold' : 'text-gray-700'}" aria-pressed={layout.id === $currentProject?.activeLayoutId} onclick={() => { setActiveLayout(layout.id); moreOpen = false; }}>
+            {layout.name}{layout.id === $currentProject?.activeLayoutId ? ' ✓' : ''}
+          </button>
+        {/each}
+        <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" aria-label={$t('layouts.create')} onclick={onCreateLayout}>+ {$t('layouts.create')}</button>
+        <div class="h-px bg-gray-100 my-1"></div>
         {#if floors.length > 1 || mode === '2d'}
           <div class="px-3 pt-1.5 pb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">{$t('floorControls.floors')}</div>
           {#each floors as fl}

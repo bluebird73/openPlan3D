@@ -291,6 +291,23 @@ export function setActiveLayout(layoutId: string) {
   return true;
 }
 
+export function createLayout(): string | null {
+  const p = get(currentProject);
+  if (!p) return null;
+  undoGroupDepth = 0;
+  undoGroupSnapshot = null;
+  resetCoalescing();
+  snapshot('Created Layout');
+  let id = uid();
+  while (p.layouts.some(layout => layout.id === id)) id = uid();
+  const layout: Layout = { id, name: `Layout ${p.layouts.length + 1}`, furnitureByFloor: {} };
+  p.layouts.push(layout);
+  p.activeLayoutId = id;
+  p.updatedAt = new Date();
+  currentProject.set({ ...p });
+  return id;
+}
+
 export function addWall(start: Point, end: Point): string {
   const id = uid();
   mutate((f) => {

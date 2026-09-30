@@ -29,26 +29,50 @@ test('imports, previews, places and retains a local custom model through undo an
     await page.getByRole('button', { name: 'Download JSON', exact: true }).click();
     return JSON.parse(await readFile((await (await pending).path())!, 'utf8'));
   }
+  const furnitureForActiveLayout = (project: any) =>
+    project.layouts.find((layout: any) => layout.id === project.activeLayoutId)
+      ?.furnitureByFloor[project.activeFloorId] ?? [];
+
   const imported = await exported(), model = imported.customModels[0];
-  expect(model).toMatchObject({ name: 'My textured box', attribution: 'Fixture author', width: 100, depth: 75, height: 50,
-    sha256: createHash('sha256').update(bytes).digest('hex'), byteLength: bytes.length });
+  expect(model).toMatchObject({
+    name: 'My textured box',
+    attribution: 'Fixture author',
+    width: 100,
+    depth: 75,
+    height: 50,
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+    byteLength: bytes.length
+  });
   expect(imported.projectPackage.assets[`assets/${model.assetName}`]).toBe(bytes.toString('base64'));
+
   await panel.getByRole('button', { name: 'Place at view center', exact: true }).click();
   const placed = await exported();
-  const floor = placed.floors.find((floor: any) => floor.id === placed.activeFloorId);
-  expect(floor.furniture.at(-1)).toMatchObject({ customModelId: model.id, width: 100, depth: 75, height: 50 });
+  expect(furnitureForActiveLayout(placed).at(-1)).toMatchObject({
+    customModelId: model.id,
+    width: 100,
+    depth: 75,
+    height: 50
+  });
+
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   const undone = await exported();
+  expect(undone.layouts).toEqual(imported.layouts);
   expect(undone.floors).toEqual(imported.floors);
   expect(undone.customModels).toEqual(imported.customModels);
+
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
-  expect((await exported()).floors).toEqual(placed.floors);
+  const redone = await exported();
+  expect(redone.layouts).toEqual(placed.layouts);
+  expect(redone.floors).toEqual(placed.floors);
+
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect.poll(async () => (await savedProjects(page))[placed.id]?.customModels).toEqual(placed.customModels);
+
   await page.reload();
   const retained = await exported();
   expect(retained.customModels).toEqual(placed.customModels);
   expect(retained.projectPackage.assets[`assets/${model.assetName}`]).toBe(bytes.toString('base64'));
+  expect(retained.layouts).toEqual(placed.layouts);
   expect(retained.floors).toEqual(placed.floors);
   expect(errors).toEqual([]);
 });

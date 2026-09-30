@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { get } from 'svelte/store';
 import {
-  activeFloor, addFurniture, createDefaultProject, currentProject, loadProject,
-  moveFurniture, removeFurniture, setActiveLayout, undo, updateFurniture,
+  activeFloor, addFurniture, createDefaultProject, createLayout, currentProject, loadProject,
+  moveFurniture, removeFurniture, setActiveLayout, undo, undoHistoryStore, updateFurniture,
 } from '$lib/stores/project';
 
 const furniture = (id: string, catalogId: string) => ({ id, catalogId, position: { x: 0, y: 0 }, rotation: 0, scale: { x: 1, y: 1, z: 1 } });
@@ -19,6 +19,19 @@ function projectWithLayouts() {
 }
 
 describe('project store Layout authority', () => {
+  it('creates an empty Layout with shared structure and treats switching as non-content history', () => {
+    const project = projectWithLayouts();
+    project.floors[0].walls = [{ id: 'wall', start: { x: 0, y: 0 }, end: { x: 100, y: 0 }, thickness: 10, height: 250 }];
+    loadProject(project);
+    const before = get(currentProject)!, id = createLayout()!, created = get(currentProject)!;
+    expect(created.layouts.at(-1)).toEqual({ id, name: 'Layout 3', furnitureByFloor: {} });
+    expect(created.activeLayoutId).toBe(id);
+    expect(created.floors).toEqual(before.floors);
+    const historyLength = get(undoHistoryStore).entries.length;
+    setActiveLayout('a');
+    expect(get(undoHistoryStore).entries).toHaveLength(historyLength);
+  });
+
   it('switches composed reads without copying furniture or structure', () => {
     const project = projectWithLayouts(), floorId = project.floors[0].id;
     project.floors[0].walls = [{ id: 'wall', start: { x: 0, y: 0 }, end: { x: 100, y: 0 }, thickness: 10, height: 250 }];

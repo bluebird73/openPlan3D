@@ -3,7 +3,7 @@
   import { get } from 'svelte/store';
   import { t, locale } from '$lib/i18n';
   import { customModelError } from '$lib/i18n/customModelMessages';
-  import { currentProject, commitItemDetails, canvasCamX, canvasCamY, selectedElementId, selectedElementIds, selectedTool } from '$lib/stores/project';
+  import { currentProject, getFurnitureForFloor, commitItemDetails, canvasCamX, canvasCamY, selectedElementId, selectedElementIds, selectedTool } from '$lib/stores/project';
   import { getSnapshots } from '$lib/stores/versionHistory';
   import { modalDialog } from '$lib/utils/modalDialog';
   import type { PreparedCustomModel } from '$lib/services/customModelImport';
@@ -68,8 +68,7 @@
     error = ''; status = '';
     try {
       const next = placeCustomModel(project, id, { x: get(canvasCamX), y: get(canvasCamY) });
-      const floor = next.floors.find(floor => floor.id === next.activeFloorId)!;
-      const item = floor.furniture.at(-1)!;
+      const item = getFurnitureForFloor(next, next.activeFloorId).at(-1)!;
       commitItemDetails(project, next, 'Placed custom model');
       selectedTool.set('select'); selectedElementId.set(item.id); selectedElementIds.set(new Set());
       status = get(t)('customModel.placed');
