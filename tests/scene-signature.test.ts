@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import { sceneSignature } from '$lib/utils/sceneSignature';
 import { benchmarkProject } from './fixtures/render-benchmark';
 import type { Project } from '$lib/models/types';
+import { furnitureForFloor } from './fixtures/layoutFurniture';
 
 const signature = (project: Project, stacked = false) => sceneSignature(project, project.floors[0], stacked, 'metric');
 
@@ -11,8 +12,9 @@ it('ignores project metadata, item details and 2D payloads without serializing p
   const unread = { toJSON() { throw new Error('Large photo payload must not be visited'); } };
   Object.assign(project, { projectPackage: unread, attachmentNames: unread, customEntourage: unread });
   for (const floor of project.floors) {
-    for (const key of ['walls', 'rooms', 'doors', 'windows', 'furniture'] as const)
+    for (const key of ['walls', 'rooms', 'doors', 'windows'] as const)
       for (const item of floor[key]) item.details = { note: 'New note', price: 45, material: 'Metadata only', ceilingHeight: 240, photos: ['assets/photo.jpg'] };
+    for (const item of furnitureForFloor(project, project.floors.indexOf(floor))) item.details = { note: 'New note', price: 45, material: 'Metadata only', photos: ['assets/photo.jpg'] };
     Object.assign(floor, { backgroundImage: unread, guides: unread, measurements: unread,
       annotations: unread, textAnnotations: unread, groups: unread, entourage: unread });
   }
@@ -34,8 +36,8 @@ for (const [name, edit] of Object.entries({
   'wall finish': (p: Project) => { p.floors[0].walls[0].interiorTexture = 'brick'; },
   'door swing': (p: Project) => { p.floors[0].doors[0].flipSide = true; },
   'window height': (p: Project) => { p.floors[0].windows[0].sillHeight = 10; },
-  'furniture finish': (p: Project) => { p.floors[0].furniture[0].material = 'wood'; },
-  'furniture size': (p: Project) => { p.floors[0].furniture[0].width = 110; },
+  'furniture finish': (p: Project) => { furnitureForFloor(p)[0].material = 'wood'; },
+  'furniture size': (p: Project) => { furnitureForFloor(p)[0].width = 110; },
   'room label': (p: Project) => { p.floors[0].rooms[0].name = 'Kitchen'; },
   'room finish': (p: Project) => { p.floors[0].rooms[0].floorTexture = 'wood'; },
   'column': (p: Project) => { p.floors[0].columns.push({ id: 'column', shape: 'round', position: { x: 0, y: 0 }, rotation: 0, diameter: 30, height: 280, color: '#aaa' }); },

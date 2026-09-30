@@ -40,7 +40,10 @@ export function withNativeDetails(item: Record<string, any>, details: ItemDetail
   return item;
 }
 export function detailItem(project: Project, target: DetailTarget) {
-  return project.floors.find(floor => floor.id === target.floorId)?.[target.kind].find(item => item.id === target.id);
+  const floor = project.floors.find(item => item.id === target.floorId);
+  const layout = project.layouts.find(item => item.id === project.activeLayoutId) ?? project.layouts[0];
+  const items = target.kind === 'furniture' ? layout?.furnitureByFloor[target.floorId] : floor?.[target.kind];
+  return items?.find(item => item.id === target.id);
 }
 export function validateRetainedDetailState(value: any) {
   const object = (v: any) => v && typeof v === 'object' && !Array.isArray(v);

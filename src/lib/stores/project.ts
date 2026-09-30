@@ -12,6 +12,7 @@ import { getWallStartHeight, getWallEndHeight, getWallHeightAt, validWallHeight 
 import type { DetailTarget, ItemDetails } from '$lib/models/types';
 import { detailItem, itemDetails, validateItemDetails } from '$lib/utils/itemDetails';
 import { readProject } from '$lib/utils/projectValidation';
+import { composedFloor } from '$lib/utils/composedFloor';
 
 
 function uid(): string {
@@ -50,8 +51,7 @@ export function getFurnitureForFloor(project: Project | null, floorId: string): 
 
 export const activeFloor = derived(currentProject, ($p) => {
   if (!$p) return null;
-  const floor = $p.floors.find((f) => f.id === $p.activeFloorId) ?? $p.floors[0];
-  return floor ? { ...floor, furniture: getFurnitureForFloor($p, floor.id) } as ComposedFloor : null;
+  return composedFloor($p) ?? null;
 });
 
 export const activeLayout = derived(currentProject, ($p) => getActiveLayout($p));

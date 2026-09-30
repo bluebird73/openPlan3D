@@ -7,6 +7,7 @@ import { entouragePlanBounds } from './entouragePlanBounds';
 import { planContentBounds } from './planContentBounds';
 import { columnPlanBounds } from './columnPlanGeometry';
 import { hasPlanExportContent } from './planExportContent';
+import { composedFloor } from './composedFloor';
 import { dimensionPlanGeometry } from './dimensionPlanGeometry';
 import { textAnnotationBounds, textAnnotationLines } from './textAnnotationLayout';
 import { canvasSymbolSvg } from './canvasSymbolSvg';
@@ -179,7 +180,7 @@ export async function exportAsPNG(canvas: HTMLCanvasElement | null, project?: Pr
 
   if (project) {
     const snapshot=structuredClone(project);
-    const floor = snapshot.floors.find(f => f.id === snapshot.activeFloorId) ?? snapshot.floors[0];
+    const floor = composedFloor(snapshot);
     const entourage=(floor?.entourage ?? []).flatMap(item=>{
       const def=getEntourageDef(item.defId),custom=def?undefined:snapshot.customEntourage?.find(d=>d.id===item.defId);
       return def || custom ? [{item,custom,aspect:def?.aspect ?? custom!.aspect}] : [];
@@ -314,7 +315,7 @@ export async function exportAsPNG(canvas: HTMLCanvasElement | null, project?: Pr
 export { downloadProjectJSON as exportAsJSON } from './projectBackup';
 
 export function exportAsSVG(project: Project, language: Locale = 'en') {
-  const floor = project.floors.find(f => f.id === project.activeFloorId) ?? project.floors[0];
+  const floor = composedFloor(project);
   if (!floor) return;
   const entourage=(floor.entourage ?? []).flatMap(item=>{
     const def=getEntourageDef(item.defId), custom=def?undefined:project.customEntourage?.find(d=>d.id===item.defId);
@@ -648,7 +649,7 @@ export function exportAs3DPNG(renderer: { domElement: HTMLCanvasElement }) {
 
 export async function exportPDF(project: Project) {
   const snapshot=structuredClone(project);
-  const floor=snapshot.floors.find(f=>f.id===snapshot.activeFloorId) ?? snapshot.floors[0];
+  const floor=composedFloor(snapshot);
   const definitions=[...new Set((floor?.entourage ?? []).flatMap(item=>{
     const def=getEntourageDef(item.defId)?undefined:snapshot.customEntourage?.find(d=>d.id===item.defId);
     return def?[def]:[];
@@ -665,7 +666,7 @@ export async function exportPDF(project: Project) {
 }
 
 function renderPDF(project: Project, preparedImages: ReadonlyMap<string,HTMLImageElement>, capture: {width:number;height:number;image?:string}|null) {
-  const floor = project.floors.find(f => f.id === project.activeFloorId) ?? project.floors[0];
+  const floor = composedFloor(project);
   if (!floor) return;
   const entourage=(floor.entourage ?? []).flatMap(item=>{
     const def=getEntourageDef(item.defId),custom=def?undefined:project.customEntourage?.find(d=>d.id===item.defId);

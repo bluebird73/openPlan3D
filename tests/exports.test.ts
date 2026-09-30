@@ -47,7 +47,7 @@ function namedProject() {
 
 it('localizes vector furniture captions while preserving geometry and source data', async () => {
   const project = namedProject();
-  project.floors[0].furniture = [{ id: 'caption-chair', catalogId: 'chair', position: { x: 150, y: 120 }, rotation: 35, scale: { x: -1, y: 1.2, z: 1 } }];
+  project.layouts[0].furnitureByFloor[project.floors[0].id] = [{ id: 'caption-chair', catalogId: 'chair', position: { x: 150, y: 120 }, rotation: 35, scale: { x: -1, y: 1.2, z: 1 } }];
   const before = JSON.stringify(project);
   exportAsSVG(project);
   const englishSVG = await downloaded.at(-1)!.text();
@@ -199,7 +199,7 @@ it('does not capture a viewport for an empty project floor', async () => {
 });
 
 it('frames an oversized rotated furniture symbol consistently in PNG and PDF', async()=>{
- const project=namedProject();project.floors[0].furniture=[{id:'large',catalogId:'unknown',position:{x:-600,y:-600},rotation:45,width:800,depth:300,scale:{x:1,y:1,z:1}}];
+ const project=namedProject();project.layouts[0].furnitureByFloor[project.floors[0].id]=[{id:'large',catalogId:'unknown',position:{x:-600,y:-600},rotation:45,width:800,depth:300,scale:{x:1,y:1,z:1}}];
  await exportAsPNG(null,project);const size={width:canvas.width,height:canvas.height};
  expect(size.width).toBeGreaterThan(3000);
  await exportPDF(project);expect({width:canvas.width,height:canvas.height}).toEqual(size);
@@ -246,7 +246,7 @@ it.each([[304.8, "10'"], [23.8*2.54, "2'"]])('uses imperial units for a %s cm me
 it.each([false, true])('exports missing-catalog furniture with shared dimensions (saved=%s)', async saved => {
   const project = roomProject(), floor = project.floors[0];
   floor.walls = []; floor.rooms = []; floor.doors = []; floor.windows = [];
-  floor.furniture = [{ id: 'missing', catalogId: 'unavailable-model', position: { x: 100, y: 200 },
+  project.layouts[0].furnitureByFloor[floor.id] = [{ id: 'missing', catalogId: 'unavailable-model', position: { x: 100, y: 200 },
     rotation: 30, scale: { x: -2, y: 0.5, z: 1 },
     ...(saved ? { width: 160, depth: 80 } : {}) }];
   const before = structuredClone(project);
@@ -285,7 +285,7 @@ it.each([false, true])('exports missing-catalog furniture with shared dimensions
 it('draws detailed catalog furniture in both raster exports with readable mirrored captions', async () => {
   const project=roomProject(), floor=project.floors[0];
   floor.walls=[];floor.rooms=[];floor.doors=[];floor.windows=[];
-  floor.furniture=[{id:'chair',catalogId:'chair',position:{x:100,y:200},rotation:30,scale:{x:-1,y:1,z:1}}];
+  project.layouts[0].furnitureByFloor[floor.id]=[{id:'chair',catalogId:'chair',position:{x:100,y:200},rotation:30,scale:{x:-1,y:1,z:1}}];
   const before=structuredClone(project);
   for(const render of [()=>exportAsPNG(canvas,project),async()=>await exportPDF(project)]) {
     canvasCurve.mockClear();canvasText.mockClear();

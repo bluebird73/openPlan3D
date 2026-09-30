@@ -4,11 +4,12 @@ import { createDefaultProject, currentProject, undo, redo } from '$lib/stores/pr
 import { roomPresets } from '$lib/utils/roomPresets';
 import { placeRoomTemplate, roomTemplates } from '$lib/utils/roomTemplates';
 import { getFurnitureSize } from '$lib/utils/furnitureCatalog';
+import { activeFloor } from '$lib/stores/project';
 
 it.each(roomTemplates)('$name furniture fits inside the walls without overlapping', template => {
   currentProject.set(createDefaultProject('Template layout'));
   placeRoomTemplate(roomPresets.find(p => p.id === template.presetId)!, { x: 0, y: 0 }, template);
-  const floor = get(currentProject)!.floors[0];
+  const floor = get(activeFloor)!;
   const inset = Math.max(...floor.walls.map(wall => wall.thickness)) / 2;
   const boxes = floor.furniture.map(item => {
     const size = getFurnitureSize(item), angle = item.rotation * Math.PI / 180;
@@ -37,8 +38,8 @@ it('template rotations survive placement and one-step Undo/Redo', () => {
     name: 'Rotated', presetId: roomPresets[0].id,
     furniture: [{ catalogId: 'bookshelf', x: -100, y: 20, rotation: 90 }],
   });
-  const placed = structuredClone(get(currentProject)!.floors);
-  expect(placed[0].furniture[0]).toMatchObject({ position: { x: -30, y: 110 }, rotation: 90 });
+  const placed = structuredClone(get(currentProject)!);
+  expect(placed.layouts[0].furnitureByFloor[placed.floors[0].id][0]).toMatchObject({ position: { x: -30, y: 110 }, rotation: 90 });
   undo(); expect(get(currentProject)!.floors).toEqual(before);
-  redo(); expect(get(currentProject)!.floors).toEqual(placed);
+  redo(); expect(get(currentProject)!.layouts).toEqual(placed.layouts);
 });

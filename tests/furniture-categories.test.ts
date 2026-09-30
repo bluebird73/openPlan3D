@@ -13,6 +13,7 @@ import { createProjectFromRoomPlan } from '$lib/utils/roomplanImport';
 import { createLocalStore } from '$lib/services/datastore';
 import { roomProject } from './fixtures/project';
 import { mockStorage } from './fixtures/indexeddb';
+import { furnitureForFloor } from './fixtures/layoutFurniture';
 
 beforeEach(() => { mockStorage(); });
 
@@ -32,7 +33,7 @@ function nativeProject() {
 }
 function webProject() {
   const project = roomProject(); project.name = 'QA Web Furniture Categories';
-  project.floors[0].furniture = ['bed_queen', 'fridge', 'sink_k', 'washer_dryer', 'loveseat', 'bed_twin', 'imported_object'].map((catalogId, i) => ({
+  project.layouts[0].furnitureByFloor[project.floors[0].id] = ['bed_queen', 'fridge', 'sink_k', 'washer_dryer', 'loveseat', 'bed_twin', 'imported_object'].map((catalogId, i) => ({
     id: `web-category-${i}`, catalogId, ...(catalogId === 'imported_object' ? { sourceCategory: 'future-appliance' } : {}),
     width: 81.125, depth: 57.375, height: 94.625, position: { x: 60 + i % 3 * 180, y: 70 + Math.floor(i / 3) * 130 },
     rotation: 17.25, scale: { x: -1.25, y: 1.125, z: 1 }, color: '#245678',
@@ -60,7 +61,7 @@ it('retains categories, IDs, fractional geometry and unknown fields through repe
     expect(returned).toEqual(original); expect(statistics.version).toBe(1);
     project = readProjectPackage(bytes).project;
   }
-  project.floors[0].furniture.forEach(item => { item.width = 122.875; item.rotation = 32.75; item.details = { ...item.details, note: 'Web edit' }; });
+  furnitureForFloor(project).forEach(item => { item.width = 122.875; item.rotation = 32.75; item.details = { ...item.details, note: 'Web edit' }; });
   const returned = packageJSON(readPackageZip(projectPackageBytes(project))['plan.json']);
   returned.furniture.forEach((item: any, i: number) => {
     expect(item).toMatchObject({ category: original.furniture[i].category, id: original.furniture[i].id, width: 1.22875, note: 'Web edit', future: { retain: i } });
@@ -68,7 +69,7 @@ it('retains categories, IDs, fractional geometry and unknown fields through repe
   });
 });
 it('lets a deliberate catalog replacement change category without retaining stale unknown provenance', () => {
-  const project = nativeProject(), item = project.floors[0].furniture.at(-1)!;
+  const project = nativeProject(), item = furnitureForFloor(project).at(-1)!;
   item.catalogId = 'chair';
   const returned = packageJSON(readPackageZip(projectPackageBytes(project))['plan.json']);
   expect(returned.furniture.at(-1).category).toBe('chair');
@@ -77,12 +78,13 @@ it('repairs legacy package chair fallbacks without changing dimensions, metadata
   const files = readPackageZip(projectPackageBytes(nativeProject()));
   const baseline = packageJSON(files['baseline.json']), source = packageJSON(files['web.json']);
   delete baseline.openplanFurnitureCategoriesVersion;
-  for (const item of source.floors[0].furniture) item.catalogId = 'chair';
-  source.floors[0].furniture[3].catalogId = 'desk';
+  const sourceFurniture = source.layouts[0].furnitureByFloor[source.floors[0].id];
+  for (const item of sourceFurniture) item.catalogId = 'chair';
+  sourceFurniture[3].catalogId = 'desk';
   files['baseline.json'] = jsonBytes(baseline); files['web.json'] = jsonBytes(source);
   const result = readProjectPackage(writePackageZip(files)).project;
-  expect(result.floors[0].furniture.map(f => f.catalogId)).toEqual(['chair', 'stairs', 'bed_queen', 'desk', 'sink_b', 'washer_dryer', 'washer_dryer', 'imported_object']);
-  result.floors[0].furniture.forEach((item, i) => expect(item).toMatchObject({ width: source.floors[0].furniture[i].width, details: source.floors[0].furniture[i].details }));
+  expect(furnitureForFloor(result).map(f => f.catalogId)).toEqual(['chair', 'stairs', 'bed_queen', 'desk', 'sink_b', 'washer_dryer', 'washer_dryer', 'imported_object']);
+  furnitureForFloor(result).forEach((item, i) => expect(item).toMatchObject({ width: sourceFurniture[i].width, details: sourceFurniture[i].details }));
 });
 it('rejects unknown future category contracts', () => {
   const files = readPackageZip(projectPackageBytes(nativeProject()));
@@ -94,15 +96,15 @@ it('exporting older saved projects cannot turn retained native categories into c
   const project = nativeProject(), state = (project as any).projectPackage;
   delete state.furnitureCategoriesVersion;
   const categories = state.native.furniture.map((f: any) => f.category);
-  for (const item of project.floors[0].furniture) if (!furnitureCatalog.some(def => def.id === item.catalogId)) item.catalogId = 'chair';
+  for (const item of furnitureForFloor(project)) if (!furnitureCatalog.some(def => def.id === item.catalogId)) item.catalogId = 'chair';
   // Model the old persisted projection for aliases too.
-  project.floors[0].furniture[2].catalogId = 'chair';
-  project.floors[0].furniture[2].width = 121.875;
+  furnitureForFloor(project)[2].catalogId = 'chair';
+  furnitureForFloor(project)[2].width = 121.875;
   const files = readPackageZip(projectPackageBytes(project));
   expect(packageJSON(files['plan.json']).furniture.map((f: any) => f.category)).toEqual(categories);
   expect(packageJSON(files['plan.json']).furniture[2].width).toBe(1.21875);
-  expect(project.floors[0].furniture[2].catalogId).toBe('chair'); // Serialization does not mutate the open editor.
-  const moved = project.floors[0].furniture.splice(2, 1)[0]; project.floors[1].furniture.push(moved);
+  expect(furnitureForFloor(project)[2].catalogId).toBe('chair'); // Serialization does not mutate the open editor.
+  const moved = furnitureForFloor(project).splice(2, 1)[0]; furnitureForFloor(project, 1).push(moved);
   const movedPlan = packageJSON(readPackageZip(projectPackageBytes(project))['plan.json']);
   expect(movedPlan.furniture.find((f: any) => f.id === moved.id)).toMatchObject({ category: 'bed', width: 1.21875, level: project.floors[1].level });
 });
@@ -110,7 +112,7 @@ it('uses the same mappings for RoomPlan JSON including original unknown names', 
   const source = JSON.parse(readFileSync('tests/fixtures/handoff-roomplan.json', 'utf8'));
   source.objects = cases.cases.filter(row => row.category).map((row, i) => ({ identifier: `category-${i}`, category: { [row.category]: {} }, dimensions: [row.widthCm / 100, 0.9, 0.83125], transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, i, 0, 0, 1] }));
   const project = createProjectFromRoomPlan(source, 'Categories');
-  expect(project.floors.flatMap(f => f.furniture).map(f => f.catalogId)).toEqual(cases.cases.filter(row => row.category).map(row => row.catalogId));
+  expect(project.layouts[0].furnitureByFloor[project.floors[0].id].map(f => f.catalogId)).toEqual(cases.cases.filter(row => row.category).map(row => row.catalogId));
 });
 it('renders stairs and unknown objects with bounded procedural geometry and no model files', () => {
   for (const id of ['stairs', 'imported_object']) {
@@ -128,15 +130,15 @@ it('actual Swift returns retain source identities and apply fractional edits in 
     expect(plan.furniture.map((f: any) => f.category)).toEqual(original.furniture.map((f: any) => f.category));
     expect(plan.furniture[0]).toMatchObject({ width: 1.3125, note: 'Native category edit' });
     const project = readProjectPackage(bytes).project;
-    expect(getFurnitureSize(project.floors[0].furniture[0]).width).toBeCloseTo(131.25);
-    expect(project.floors[0].furniture[0].details?.note).toBe('Native category edit');
+    expect(getFurnitureSize(furnitureForFloor(project)[0]).width).toBeCloseTo(131.25);
+    expect(furnitureForFloor(project)[0].details?.note).toBe('Native category edit');
     // Swift UUID encoding uses uppercase; UUID identity is case-insensitive.
     const normalizeIDs = (items: any[]) => items.map(item => ({ ...item, id: item.id.toLowerCase() }));
     // The old Swift fixture predates reflection/height fields. Its seven web
     // objects share 94.625 cm height and unit Z scale; now share those dimensions.
     const expected = plan.furniture.map((item: any) => name === 'web' ? { ...item, mirrorX: true, height: 0.94625 } : item);
     expect(normalizeIDs(packageJSON(readPackageZip(projectPackageBytes(project))['plan.json']).furniture)).toEqual(normalizeIDs(expected));
-    if (name === 'web') expect(project.floors[0].furniture[0]).toMatchObject({ catalogId: 'bed_queen', height: 94.625, scale: { x: -1.25, y: 1.125, z: 1 }, color: '#245678' });
+    if (name === 'web') expect(furnitureForFloor(project)[0]).toMatchObject({ catalogId: 'bed_queen', height: 94.625, scale: { x: -1.25, y: 1.125, z: 1 }, color: '#245678' });
   }
 });
 it('emits category package fixtures when explicitly requested', () => {

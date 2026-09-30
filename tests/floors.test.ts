@@ -48,7 +48,7 @@ it('seeds only exterior walls and leaves openings, furniture and room metadata d
   expect(added.walls).toHaveLength(4);
   expect(added.doors).toEqual([]);
   expect(added.rooms).toEqual([]);
-  expect(added.furniture).toEqual([]);
+  expect(get(currentProject)!.layouts[0].furnitureByFloor[added.id] ?? []).toEqual([]);
   expect(source.walls).toHaveLength(5);
   expect(source.doors).toHaveLength(1);
   undo();

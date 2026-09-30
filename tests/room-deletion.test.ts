@@ -3,11 +3,12 @@ import { readFileSync } from 'node:fs';
 import { get } from 'svelte/store';
 import { currentProject, detectedRoomsStore, removeRoom, undo, redo } from '$lib/stores/project';
 import { benchmarkProject } from './fixtures/render-benchmark';
+import { readProject } from '$lib/utils/projectValidation';
 
 beforeEach(() => detectedRoomsStore.set([]));
 
 for (const saved of [true, false]) it(`deletes ${saved ? 'saved' : 'detected'} room boundaries with one reversible operation`, () => {
-  const project = JSON.parse(readFileSync('tests/fixtures/connected-dimensions.openplan.json', 'utf8'));
+  const project = readProject(JSON.parse(readFileSync('tests/fixtures/connected-dimensions.openplan.json', 'utf8')));
   const floor = project.floors[0];
   const target = floor.rooms[0];
   if (!saved) {

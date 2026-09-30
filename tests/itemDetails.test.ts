@@ -8,6 +8,7 @@ import { itemDetails } from '$lib/utils/itemDetails';
 import { readProject } from '$lib/utils/projectValidation';
 import { attachItemPhoto, checkPhotoStorage, deleteUnusedPhoto, photoHeader, photoStorageBytes } from '$lib/services/itemPhotos';
 import { currentProject, loadProject, updateItemDetails, commitItemDetails, undo, redo, updateWall, undoHistoryStore } from '$lib/stores/project';
+import { furnitureForFloor } from './fixtures/layoutFurniture';
 import { saveSnapshot, getSnapshots, snapshotError } from '$lib/stores/versionHistory';
 import { readSnapshotStorage, writeSnapshotStorage } from '$lib/utils/snapshotStorage';
 import { libraryBackup } from '$lib/services/localDatabase';
@@ -16,7 +17,7 @@ import { prepareLibraryRestore } from '$lib/services/libraryRestore';
 import { mockStorage, rawRecords, putRaw, failWrites } from './fixtures/indexeddb';
 
 const fixture = () => readProjectPackage(new Uint8Array(readFileSync('tests/fixtures/native-project-package.zip'))).project;
-const target = (p: Project, kind: DetailTarget['kind'], index = 0): DetailTarget => ({ floorId: p.floors[0].id, kind, id: p.floors[0][kind][index].id });
+const target = (p: Project, kind: DetailTarget['kind'], index = 0): DetailTarget => ({ floorId: p.floors[0].id, kind, id: (kind === 'furniture' ? furnitureForFloor(p) : p.floors[0][kind])[index].id });
 const photo = { name: 'new-photo.png', data: readFileSync('tests/fixtures/item-photo.png').toString('base64') };
 const state = () => get(currentProject)!;
 const native = (p: Project) => packageJSON(readPackageZip(projectPackageBytes(p))['plan.json']);
@@ -47,22 +48,22 @@ it('edits and clears native metadata without changing geometry, unknown fields o
 it('applies returned iPhone metadata deletions and preserves unrelated web details', () => {
   const p = state(), ref = target(p, 'furniture');
   updateItemDetails(ref, { note: 'To be cleared', price: 50 });
-  (state().floors[0].furniture[0].details as any).future = { retained: true };
+  (furnitureForFloor(state())[0].details as any).future = { retained: true };
   const files = readPackageZip(projectPackageBytes(state())), edited = packageJSON(files['plan.json']);
   delete edited.furniture[0].note; delete edited.furniture[0].price; edited.furniture[0].photos = [];
   files['plan.json'] = jsonBytes(edited);
   const returned = readProjectPackage(writePackageZip(files)).project;
-  expect(returned.floors[0].furniture[0].details).toMatchObject({ note: null, price: null, photos: [], future: { retained: true } });
+  expect(furnitureForFloor(returned)[0].details).toMatchObject({ note: null, price: null, photos: [], future: { retained: true } });
   expect(native(returned).furniture[0].note).toBeUndefined();
   expect(native(returned).furniture[0].price).toBeUndefined();
 });
 it('resolves old saved packages without details and preserves identities across floor moves', () => {
   const p = state(), ref = target(p, 'furniture');
-  delete p.floors[0].furniture[0].details;
+  delete furnitureForFloor(p)[0].details;
   const before = JSON.stringify(p);
   expect(itemDetails(p, ref)).toMatchObject({ note: 'Keep furniture note', price: 456.75, photos: ['chair.png'] });
   expect(JSON.stringify(p)).toBe(before);
-  const item = p.floors[0].furniture.shift()!; p.floors[1].furniture.push(item); p.activeFloorId = p.floors[1].id;
+  const item = furnitureForFloor(p).shift()!; furnitureForFloor(p, 1).push(item); p.activeFloorId = p.floors[1].id;
   const moved = { ...ref, floorId: p.floors[1].id };
   updateItemDetails(moved, { note: 'Moved and edited' });
   expect(native(state()).furniture[0]).toMatchObject({ id: item.id, note: 'Moved and edited', price: 456.75, photos: ['chair.png'], level: 2 });
@@ -102,19 +103,19 @@ it('uses native metadata from older web exporters instead of their stale retaine
   delete baseline.openplanItemDetailsVersion;
   files['plan.json'] = jsonBytes(plan); files['baseline.json'] = jsonBytes(baseline);
   const returned = readProjectPackage(writePackageZip(files)).project;
-  expect(returned.floors[0].furniture[0].details).toMatchObject({ price: 9.125, note: null });
+  expect(furnitureForFloor(returned)[0].details).toMatchObject({ price: 9.125, note: null });
   expect(native(returned).furniture[0].price).toBe(9.125);
 });
 it('rejects missing attachments hidden in retained web metadata before import', () => {
   const files = readPackageZip(projectPackageBytes(state())), web = packageJSON(files['web.json']);
-  web.floors[0].furniture[0].details.photos = ['missing.png']; files['web.json'] = jsonBytes(web);
+  web.layouts[0].furnitureByFloor[web.floors[0].id][0].details.photos = ['missing.png']; files['web.json'] = jsonBytes(web);
   expect(() => readProjectPackage(writePackageZip(files))).toThrow(/Missing attachment/);
 });
 it.each([{ price: -1 }, { price: Infinity }, { photos: ['../private.png'] }, { photos: null }])('rejects malformed metadata before changing the editor: %j', patch => {
   const before = JSON.stringify(state());
   expect(() => updateItemDetails(target(state(), 'furniture'), patch as any)).toThrow(/Invalid item details/);
   expect(JSON.stringify(state())).toBe(before);
-  const bad = fixture(); bad.floors[0].furniture[0].details = patch as any;
+  const bad = fixture(); furnitureForFloor(bad)[0].details = patch as any;
   expect(() => readProject(bad)).toThrow(/Invalid item details/);
 });
 it('checks image dimensions and accounts for a project and its deduplicated saved versions', () => {
@@ -147,7 +148,8 @@ it('stores a photo once across saved versions and restores independent copies th
   expect(copy!.projectPackage!.assets).toEqual(state().projectPackage!.assets);
   const restored = await getSnapshots(copy!.id);
   expect(JSON.parse(restored[0].data).id).toBe(copy!.id);
-  expect(JSON.parse(restored[0].data).floors[0].furniture[0].details.note).toBe('Version 0');
+  const restoredProject = JSON.parse(restored[0].data);
+  expect(restoredProject.layouts[0].furnitureByFloor[restoredProject.floors[0].id][0].details.note).toBe('Version 0');
   expect(JSON.parse(restored[9].data).projectPackage.assets[`assets/${photo.name}`]).toBe(photo.data);
 });
 it('retains original versions after a quota failure and never drops a missing pooled attachment', async () => {
@@ -178,7 +180,7 @@ it('bounds attachment expansion before hydrating a crafted pooled history', () =
 });
 it('reads actual Swift changes and clears back into the web metadata controls', () => {
   const returned = readProjectPackage(new Uint8Array(readFileSync('tests/fixtures/swift-metadata-return.zip'))).project;
-  expect(returned.floors[0].furniture[0].details).toMatchObject({ note: 'Native follow-up', price: null, photos: [] });
+  expect(furnitureForFloor(returned)[0].details).toMatchObject({ note: 'Native follow-up', price: null, photos: [] });
   expect(returned.floors[0].rooms[0].details).toMatchObject({ note: null, roomType: null, ceilingHeight: null });
   expect(returned.floors[0].walls[0].details).toMatchObject({ material: 'concrete', note: null });
   const again = native(returned);

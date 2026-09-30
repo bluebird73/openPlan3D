@@ -8,6 +8,7 @@ import { currentProject, loadProject } from '$lib/stores/project';
 import { getSnapshots, restoreSnapshot } from '$lib/stores/versionHistory';
 import { get } from 'svelte/store';
 import { mockStorage, putRaw, rawRecords, failWrites } from './fixtures/indexeddb';
+import { furnitureForFloor } from './fixtures/layoutFurniture';
 
 const legacy = () => JSON.parse(readFileSync('tests/fixtures/legacy-furniture-previews.openplan.json', 'utf8'));
 beforeEach(() => { mockStorage(); });
@@ -18,17 +19,17 @@ it('refreshes legacy furniture when opening without writing stored project or hi
   await putRaw('history', project.id, JSON.stringify([{ timestamp: 1, description: 'Original', data: raw }]));
   const stored = await rawRecords(), history = await rawRecords('history');
   const loaded = (await createLocalStore().load(project.id))!;
-  expect(loaded.floors[0].furniture.map(item => item.catalogId)).toEqual(['sofa', 'stairs', 'bed_queen', 'desk', 'sink_b', 'washer_dryer', 'washer_dryer', 'imported_object']);
+  expect(furnitureForFloor(loaded).map(item => item.catalogId)).toEqual(['sofa', 'stairs', 'bed_queen', 'desk', 'sink_b', 'washer_dryer', 'washer_dryer', 'imported_object']);
   expect(await rawRecords()).toEqual(stored);
   expect(await rawRecords('history')).toEqual(history);
 });
 
 it('changes only fallback presentation and its contract marker on an independent clone', async () => {
   const project = legacy(), before = JSON.stringify(project), loaded = readProject(project);
-  const expected = legacy();
+  const expected = readProject(legacy());
   const categories = ['sofa', 'stairs', 'bed_queen', 'desk', 'sink_b', 'washer_dryer', 'washer_dryer', 'imported_object'];
-  expected.floors[0].furniture.forEach((item: any, i: number) => { item.catalogId = categories[i]; });
-  expected.floors[0].furniture.at(-1).sourceCategory = 'future-appliance';
+  furnitureForFloor(expected).forEach((item: any, i: number) => { item.catalogId = categories[i]; });
+  furnitureForFloor(expected).at(-1).sourceCategory = 'future-appliance';
   expected.projectPackage.furnitureCategoriesVersion = 1;
   expect(JSON.stringify(loaded)).toBe(JSON.stringify(expected));
   expect(JSON.stringify(project)).toBe(before);
@@ -39,10 +40,10 @@ it('preserves deliberate chair choices after normalization and a subsequent save
   const project = legacy(), store = createLocalStore();
   await putRaw('projects', project.id, JSON.stringify(project));
   const loaded = (await store.load(project.id))!;
-  loaded.floors[0].furniture[2].catalogId = 'chair';
+  furnitureForFloor(loaded)[2].catalogId = 'chair';
   await store.save(loaded);
   const again = (await store.load(project.id))!;
-  expect(again.floors[0].furniture[2].catalogId).toBe('chair');
+  expect(furnitureForFloor(again)[2].catalogId).toBe('chair');
   expect(packageJSON(readPackageZip(projectPackageBytes(again))['plan.json']).furniture[2].category).toBe('chair');
 });
 
@@ -53,29 +54,30 @@ it('retains edited dimensions, mirrors, attachments, original native categories 
   expect(plan.furniture[2]).toMatchObject({ width: 1.5234375, depth: 0.93515625, note: 'Edited locally before preview refresh', price: 123.456, photos: ['legacy-photo.png'], future: { retain: 2 } });
   expect(files['assets/legacy-photo.png']).toEqual(new Uint8Array(readFileSync('tests/fixtures/item-photo.png')));
   const returned = readProjectPackage(projectPackageBytes(project)).project;
-  expect(returned.floors[0].furniture[2]).toEqual(project.floors[0].furniture[2]);
+  expect(furnitureForFloor(returned)[2]).toEqual(furnitureForFloor(project)[2]);
 });
 
 it('resolves a uniquely moved item and uses source width at the bed threshold', () => {
   const project = legacy(), bed = project.floors[0].furniture.splice(2, 1)[0];
   project.floors[1].furniture.push(bed);
   const loaded = readProject(project);
-  expect(loaded.floors[1].furniture[0]).toMatchObject({ catalogId: 'bed_queen', width: 121.875 });
+  expect(furnitureForFloor(loaded, 1)[0]).toMatchObject({ catalogId: 'bed_queen', width: 121.875 });
   project.projectPackage.native.furniture[2].width = 1.40000000000001;
-  expect(readProject(project).floors[1].furniture[0].catalogId).toBe('bed_twin');
+  expect(furnitureForFloor(readProject(project), 1)[0].catalogId).toBe('bed_twin');
 });
 
 it('does not guess from an ordinary RoomPlan chair or reinterpret an exact old catalog ID', () => {
   const noSource = legacy(); delete noSource.projectPackage;
-  expect(readProject(noSource).floors[0].furniture[2].catalogId).toBe('chair');
+  expect(furnitureForFloor(readProject(noSource))[2].catalogId).toBe('chair');
   const exact = legacy(); exact.floors[0].furniture[0].catalogId = 'chair';
-  expect(readProject(exact).floors[0].furniture[0].catalogId).toBe('chair');
+  expect(furnitureForFloor(readProject(exact))[0].catalogId).toBe('chair');
 });
 
 it.each([2, null])('leaves an unsupported category marker %s unchanged and export still rejects it', marker => {
   const project = legacy(); project.projectPackage.furnitureCategoriesVersion = marker;
   const loaded = readProject(project);
-  expect(JSON.stringify(loaded)).toBe(JSON.stringify(project));
+  expect(furnitureForFloor(loaded)).toEqual(project.floors[0].furniture);
+  expect(loaded.projectPackage).toEqual(project.projectPackage);
   expect(() => projectPackageBytes(loaded)).toThrow(/furniture-category version/);
 });
 
@@ -91,14 +93,16 @@ it.each(['duplicate-source', 'duplicate-map', 'missing-source', 'invalid-width',
     state.mapping.push({ ...entry, id: '00000000-0000-4000-8000-000000009999', floorId: 'missing-floor' });
     state.native.furniture.push({ ...state.native.furniture[2], id: '00000000-0000-4000-8000-000000009999' });
   }
-  expect(JSON.stringify(readProject(project))).toBe(JSON.stringify(project));
+  const loaded = readProject(project);
+  expect(furnitureForFloor(loaded)).toEqual(project.floors[0].furniture);
+  expect(loaded.projectPackage).toEqual(project.projectPackage);
   expect(() => projectPackageBytes(project)).toThrow();
 });
 
 it('does not recreate deleted furniture and marks resolved legacy choices only once', () => {
   const project = legacy(); project.floors[0].furniture.splice(2, 1);
   const loaded = readProject(project);
-  expect(loaded.floors[0].furniture).toHaveLength(7);
+  expect(furnitureForFloor(loaded)).toHaveLength(7);
   expect(loaded.projectPackage?.furnitureCategoriesVersion).toBe(1);
 });
 
@@ -122,6 +126,6 @@ it('normalizes restored version history without rewriting the archived snapshot'
   await putRaw('history', project.id, JSON.stringify([{ timestamp: 1, description: 'Original', data: raw }]));
   loadProject((await store.load(project.id))!);
   expect(await restoreSnapshot(project.id, 0)).toBe(true);
-  expect(get(currentProject)!.floors[0].furniture[2].catalogId).toBe('bed_queen');
+  expect(furnitureForFloor(get(currentProject)!)[2].catalogId).toBe('bed_queen');
   expect((await getSnapshots(project.id))[0].data).toBe(raw);
 });

@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { calculatePrintLayout, printBounds, type PrintOptions } from '$lib/utils/printLayout';
+import { activePrintFloor, calculatePrintLayout, printBounds, type PrintOptions } from '$lib/utils/printLayout';
 import { createPrintPDF, renderPrintPage } from '$lib/utils/scaledPrint';
 import { roomProject } from './fixtures/project';
 import { resolveRooms } from '$lib/utils/roomDetection';
@@ -36,14 +36,25 @@ it('detects overflow instead of silently shrinking the plan', () => {
   expect(fit.scaleLabel).toBe('Fit to page');
 });
 
+it('uses active Layout furniture for printed bounds without mutating the Project floor', () => {
+  const project = roomProject();
+  const floor = project.floors[0];
+  const furniture = [{ id: 'print-chair', catalogId: 'chair', position: { x: 900, y: 700 }, rotation: 0 }];
+  project.layouts[0].furnitureByFloor[floor.id] = furniture;
+  const composed = activePrintFloor(project)!;
+  expect(composed.furniture).toEqual(furniture);
+  expect(printBounds(composed)!.maxX).toBeGreaterThan(900);
+  expect('furniture' in floor).toBe(false);
+});
+
 it('bounds include wall thickness, curved walls, mirrored furniture, and no-wall drawings', () => {
-  const floor = roomProject().floors[0];
+  const floor = { ...roomProject().floors[0], furniture: [] };
   floor.walls[0].curvePoint = { x: -300, y: -300 };
   expect(printBounds(floor)?.minX).toBeLessThan(-300);
   floor.walls = [];
   expect(printBounds(floor)).toBeNull();
-  floor.furniture = [{ id: 'f', catalogId: 'sofa', position: { x: 0, y: 0 }, width: 200, depth: 100, rotation: 90, scale: { x: -1, y: 1, z: 1 } }];
-  const b = printBounds(floor)!;
+  const composed = { ...floor, furniture: [{ id: 'f', catalogId: 'sofa', position: { x: 0, y: 0 }, width: 200, depth: 100, rotation: 90, scale: { x: -1, y: 1, z: 1 } }] };
+  const b = printBounds(composed)!;
   expect(b.maxX - b.minX).toBeCloseTo(100);
   expect(b.maxY - b.minY).toBeCloseTo(200);
 });

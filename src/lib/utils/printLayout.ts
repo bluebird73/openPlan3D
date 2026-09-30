@@ -1,6 +1,7 @@
 import type { CustomEntourageDef, Floor, Point, Project } from '$lib/models/types';
 import { getFurnitureSize } from './furnitureCatalog';
 import { wallPointAt, entourageAspect } from './canvasRenderer';
+import { composedFloor } from './composedFloor';
 
 export type PrintOptions = { pageSize: 'a4' | 'letter'; orientation: 'landscape' | 'portrait'; scale: 'fit' | 25 | 50 | 100 | 200 };
 export type Bounds = { minX: number; minY: number; maxX: number; maxY: number };
@@ -55,5 +56,5 @@ export function calculatePrintLayout(bounds: Bounds, options: PrintOptions) {
 }
 
 export function activePrintFloor(project: Project) {
-  return project.floors.find(f => f.id === project.activeFloorId) ?? project.floors[0];
+  return composedFloor(project);
 }

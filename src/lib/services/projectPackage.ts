@@ -136,7 +136,7 @@ export function readProjectPackage(bytes: Uint8Array): { project: Project; asset
       const target = project.floors.find(f => f.id === floor.id);
       if (!target) continue;
       for (const kind of ['walls', 'doors', 'windows', 'furniture', 'rooms'] as DetailKind[]) for (const item of kind === 'furniture'
-        ? project.layouts.find(layout => layout.id === projectedLayoutId)?.furnitureByFloor[floor.id] ?? []
+        ? after.layouts.find(layout => layout.id === projectedLayoutId)?.furnitureByFloor[floor.id] ?? []
         : floor[kind]) {
         const found = kind === 'furniture'
           ? project.layouts.find(layout => layout.id === projectedLayoutId)?.furnitureByFloor[target.id]?.find(i => i.id === item.id)

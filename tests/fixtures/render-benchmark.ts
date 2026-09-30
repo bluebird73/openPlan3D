@@ -12,10 +12,11 @@ export type BenchmarkSize = keyof typeof benchmarkSizes;
 export function benchmarkProject(size: BenchmarkSize): Project {
   const spec = benchmarkSizes[size], roomSize = 450;
   const floors: Floor[] = [];
+  const furnitureByFloor: Record<string, import('../../src/lib/models/types').FurnitureItem[]> = {};
   for (let level = 0; level < spec.floors; level++) {
     const prefix = `bench-${size}-${level}`;
     const floor: Floor = { id: prefix, name: `Level ${level + 1}`, level, elevation: level * 300,
-      walls: [], doors: [], windows: [], rooms: [], furniture: [], stairs: [], columns: [],
+      walls: [], doors: [], windows: [], rooms: [], stairs: [], columns: [],
       guides: [], measurements: [], annotations: [], textAnnotations: [], groups: [] };
     const horizontal = (x: number, y: number) => `${prefix}-h-${x}-${y}`;
     const vertical = (x: number, y: number) => `${prefix}-v-${x}-${y}`;
@@ -28,9 +29,9 @@ export function benchmarkProject(size: BenchmarkSize): Project {
     for (let y = 0; y < spec.side; y++) for (let x = 0; x < spec.side; x++) {
       const roomId = `${prefix}-room-${x}-${y}`;
       floor.rooms.push({ id: roomId, name: `Room ${x + 1},${y + 1}`, walls: [horizontal(x, y), vertical(x + 1, y), horizontal(x, y + 1), vertical(x, y)], area: roomSize * roomSize / 10000, floorTexture: (x + y) % 2 ? 'light-oak' : 'none', color: '#ddd8d0' });
-      for (let item = 0; item < 6; item++) floor.furniture.push({ id: `${roomId}-item-${item}`, catalogId: ['chair', 'coffee_table', 'sofa'][item % 3], position: { x: x * roomSize + 100 + item % 3 * 110, y: y * roomSize + 120 + Math.floor(item / 3) * 190 }, rotation: item % 2 * 90, scale: { x: 1, y: 1, z: 1 } });
+      for (let item = 0; item < 6; item++) (furnitureByFloor[prefix] ??= []).push({ id: `${roomId}-item-${item}`, catalogId: ['chair', 'coffee_table', 'sofa'][item % 3], position: { x: x * roomSize + 100 + item % 3 * 110, y: y * roomSize + 120 + Math.floor(item / 3) * 190 }, rotation: item % 2 * 90, scale: { x: 1, y: 1, z: 1 } });
     }
     floors.push(floor);
   }
-  return { id: `benchmark-${size}`, name: `Rendering benchmark — ${size}`, floors, activeFloorId: floors[0].id, createdAt: new Date('2026-09-07T00:00:00Z'), updatedAt: new Date('2026-09-07T00:00:00Z') };
+  return { id: `benchmark-${size}`, name: `Rendering benchmark – ${size}`, floors, activeFloorId: floors[0].id, schemaVersion: 1, layouts: [{ id: 'layout-default', name: 'Default Layout', furnitureByFloor }], activeLayoutId: 'layout-default', createdAt: new Date('2026-09-07T00:00:00Z'), updatedAt: new Date('2026-09-07T00:00:00Z') };
 }

@@ -1,5 +1,6 @@
 import type { Floor, Project } from '$lib/models/types';
 import type { ProjectSettings } from '$lib/stores/settings';
+import { composedFloor } from './composedFloor';
 
 function renderedFloor(floor: Floor) {
   // These fields belong to the 2D canvas. In particular, never walk embedded
@@ -21,5 +22,5 @@ function renderedFloor(floor: Floor) {
 export function sceneSignature(project: Project, floor: Floor, stacked: boolean, units: ProjectSettings['units']): string {
   return JSON.stringify({ projectId: project.id, activeFloorId: floor.id, stacked, units,
     customModels: project.customModels,
-    floors: (stacked ? project.floors : [floor]).map(renderedFloor) });
+    floors: (stacked ? project.floors : [floor]).map(item => renderedFloor(composedFloor(project, item)!)) });
 }

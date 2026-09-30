@@ -6,6 +6,7 @@ import { canvasSymbolDxf } from './canvasSymbolDxf';
 import { drawStair } from './canvasRenderer';
 import { columnPlanCorners } from './columnPlanGeometry';
 import { hasPlanExportContent } from './planExportContent';
+import { composedFloor } from './composedFloor';
 import { dimensionPlanGeometry } from './dimensionPlanGeometry';
 import { textAnnotationLines } from './textAnnotationLayout';
 import { planOpening } from './planOpening';
@@ -40,7 +41,7 @@ const LAYER_COLORS = {
 };
 
 export function exportDXF(project: Project, language: Locale = 'en') {
-  const floor = project.floors.find(f => f.id === project.activeFloorId) ?? project.floors[0];
+  const floor = composedFloor(project);
   if (!floor || !hasPlanExportContent(floor) && !(floor.entourage ?? []).some(e=>getEntourageDef(e.defId) && e.opacity!==0)) return;
 
   const d = new Drawing();
@@ -257,7 +258,7 @@ export function exportDXF(project: Project, language: Locale = 'en') {
 export function exportDWG(project: Project, language: Locale = 'en') {
   // DWG is a proprietary binary format. No good JS library exists.
   // Export as DXF — virtually all CAD software (AutoCAD, SketchUp, etc.) opens DXF natively.
-  const floor = project.floors.find(f => f.id === project.activeFloorId) ?? project.floors[0];
+  const floor = composedFloor(project);
   if (!floor || !hasPlanExportContent(floor) && !(floor.entourage ?? []).some(e=>getEntourageDef(e.defId) && e.opacity!==0)) return;
 
   alert('DWG is a proprietary binary format. Exporting as DXF instead — all major CAD tools (AutoCAD, SketchUp, FreeCAD) can open DXF files directly.');
