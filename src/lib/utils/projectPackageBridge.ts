@@ -142,7 +142,8 @@ export function nativeToWeb(plan: ObjectMap, mapping: PackageMapping, title: str
     const openings = plan.openings.filter((o: any) => wallIds.has(key(o.wallID)));
     floor.doors = openings.filter((o: any) => o.kind === 'door').map((o: any) => ({ details: nativeItemDetails(o, 'doors'), id: mapped(o.id), wallId: mapped(o.wallID), position: o.position, width: cm(o.width), height: cm(o.height ?? 2), type: ['single', 'double', 'sliding'].includes(o.style) ? o.style : o.style === 'patio' ? 'sliding' : 'single', swingDirection: o.hingeLeft === false ? 'left' : 'right', flipSide: o.opensInward === false }));
     floor.windows = openings.filter((o: any) => o.kind === 'window').map((o: any) => ({ details: nativeItemDetails(o, 'windows'), id: mapped(o.id), wallId: mapped(o.wallID), position: o.position, width: cm(o.width), height: cm(o.height ?? 1.2), sillHeight: cm(o.sillHeight ?? 0.9), type: o.style === 'sliding' ? 'sliding' : 'fixed' }));
-    floor.furniture = plan.furniture.filter((f: any) => (f.level ?? 0) === level).map((f: any) => ({ details: nativeItemDetails(f, 'furniture'), id: mapped(f.id), ...importedFurnitureCategory(f.category, cm(f.width)), position: point(f.center), rotation: f.angle * 180 / Math.PI, width: cm(f.width), depth: cm(f.depth), ...(retainedValue(f, 'height') != null ? { height: cm(retainedValue(f, 'height')) } : {}), scale: { x: reflected(f, 'mirrorX') ? -1 : 1, y: reflected(f, 'mirrorY') ? -1 : 1, z: 1 } }));
+    const furniture = plan.furniture.filter((f: any) => (f.level ?? 0) === level).map((f: any) => ({ details: nativeItemDetails(f, 'furniture'), id: mapped(f.id), ...importedFurnitureCategory(f.category, cm(f.width)), position: point(f.center), rotation: f.angle * 180 / Math.PI, width: cm(f.width), depth: cm(f.depth), ...(retainedValue(f, 'height') != null ? { height: cm(retainedValue(f, 'height')) } : {}), scale: { x: reflected(f, 'mirrorX') ? -1 : 1, y: reflected(f, 'mirrorY') ? -1 : 1, z: 1 } }));
+    if (furniture.length) project.layouts[0].furnitureByFloor[floor.id] = furniture;
     const detected = detectRooms(floor.walls);
     const polygons = new Map(detected.map(room=>[room.id,getRoomPolygon(room,floor.walls)]));
     const area = (room: typeof detected[number]) => {
@@ -174,16 +175,23 @@ function changedFields(source: any, before: any, after: any): any {
   }
   return result;
 }
-export function applyNativeEdits(source: Project, before: Project, after: Project): Project {
+export function applyNativeEdits(source: Project, before: Project, after: Project, projectedLayoutId = source.activeLayoutId): Project {
   const result = readProject(source);
+  const layout = result.layouts.find(item => item.id === projectedLayoutId);
+  if (!layout) packageError('The package Layout projection is invalid.');
   if (before.description !== after.description) result.description = after.description;
   const beforeFloors = new Map(before.floors.map(f => [f.id, f]));
   const afterFloors = new Map(after.floors.map(f => [f.id, f]));
+  const removedFloorIds = result.floors.filter(f => beforeFloors.has(f.id) && !afterFloors.has(f.id)).map(f => f.id);
   result.floors = result.floors.filter(f => !beforeFloors.has(f.id) || afterFloors.has(f.id));
+  for (const floorId of removedFloorIds) for (const projectLayout of result.layouts) delete projectLayout.furnitureByFloor[floorId];
   for (const next of after.floors) {
     const previous = beforeFloors.get(next.id), index = result.floors.findIndex(f => f.id === next.id);
     if (index < 0) result.floors.push({ ...createDefaultFloor(next.level), id: next.id, name: next.name });
     const target: any = result.floors[index < 0 ? result.floors.length - 1 : index];
+    const itemsFor = (project: Project, floorId: string, kind: string, layoutId = project.activeLayoutId): any[] => kind === 'furniture'
+      ? project.layouts.find(item => item.id === layoutId)?.furnitureByFloor[floorId] ?? []
+      : (project.floors.find(floor => floor.id === floorId) as any)?.[kind] ?? [];
     if (!previous || previous.name !== next.name) target.name = next.name;
     if (!previous || previous.level !== next.level) target.level = next.level;
     if (!previous || previous.elevation !== next.elevation) {
@@ -191,14 +199,24 @@ export function applyNativeEdits(source: Project, before: Project, after: Projec
     }
     if (!previous || previous.slabThickness !== next.slabThickness) target.slabThickness = next.slabThickness;
     for (const kind of ['walls', 'doors', 'windows', 'furniture', 'rooms', 'textAnnotations'] as const) {
-      const old = new Map((previous?.[kind] ?? []).map(item => [item.id, item]));
-      const incoming = new Map(next[kind].map(item => [item.id, item]));
-      target[kind] = target[kind].filter((item: any) => !old.has(item.id) || incoming.has(item.id));
-      for (const item of next[kind]) {
-        const position = target[kind].findIndex((v: any) => v.id === item.id);
-        const originals = source.floors.flatMap<ObjectMap>(f => f[kind]).filter(v => v.id === item.id);
-        const baselines = before.floors.flatMap<ObjectMap>(f => f[kind]).filter(v => v.id === item.id);
-        const existing = target[kind][position] ?? (originals.length === 1 ? originals[0] : undefined);
+      const hadFurnitureMap = Object.hasOwn(layout.furnitureByFloor, next.id);
+      const current = kind === 'furniture' ? (layout.furnitureByFloor[next.id] ?? []) : target[kind].filter((item: any) => {
+        const priorIds = new Set(itemsFor(before, next.id, kind).map((prior: any) => prior.id));
+        const incomingIds = new Set(itemsFor(after, next.id, kind).map((incoming: any) => incoming.id));
+        return !priorIds.has(item.id) || incomingIds.has(item.id);
+      });
+      const priorItems = itemsFor(before, next.id, kind);
+      const nextItems = itemsFor(after, next.id, kind);
+      const old = new Map(priorItems.map(item => [item.id, item]));
+      if (kind === 'furniture') {
+        const incomingIds = new Set(nextItems.map(item => item.id));
+        current.splice(0, current.length, ...current.filter((item: any) => !old.has(item.id) || incomingIds.has(item.id)));
+      } else target[kind] = current;
+      for (const item of nextItems) {
+        const position = current.findIndex((v: any) => v.id === item.id);
+        const originals = source.floors.flatMap(f => itemsFor(source, f.id, kind, projectedLayoutId)).filter(v => v.id === item.id);
+        const baselines = before.floors.flatMap(f => itemsFor(before, f.id, kind)).filter(v => v.id === item.id);
+        const existing = current[position] ?? (originals.length === 1 ? originals[0] : undefined);
         const baseline: any = old.get(item.id) ?? (baselines.length === 1 ? baselines[0] : undefined);
         const updated = changedFields(existing, baseline, item);
         if (kind === 'walls' && baseline && baseline.height !== (item as any).height) {
@@ -219,7 +237,11 @@ export function applyNativeEdits(source: Project, before: Project, after: Projec
             else updated[dimension] = (item as any)[dimension] / (Math.abs(existing.scale[axis]) || 1);
           }
         }
-        if (position < 0) target[kind].push(updated); else target[kind][position] = updated;
+        if (position < 0) current.push(updated); else current[position] = updated;
+      }
+      if (kind === 'furniture') {
+        if (current.length || hadFurnitureMap) layout.furnitureByFloor[next.id] = current;
+        else delete layout.furnitureByFloor[next.id];
       }
     }
   }
@@ -256,7 +278,7 @@ export function webToNative(project: Project, original: ObjectMap | undefined, p
       plan.openings.push({ ...old, id, wallID: walls.get(item.wallId), position: item.position, width: meters(item.width), height: meters(item.height), kind: kind === 'doors' ? 'door' : 'window', style: old.style === 'patio' && style === 'sliding' ? 'patio' : style,
         ...(kind === 'doors' ? { hingeLeft: o.swingDirection === 'right', opensInward: !o.flipSide } : { sillHeight: meters(o.sillHeight) }) });
     }
-    for (const item of floor.furniture) {
+    for (const item of project.layouts.find(layout => layout.id === project.activeLayoutId)?.furnitureByFloor[floor.id] ?? []) {
       const id = identity('furniture', item.id, floor.id), old = nativeOriginal('furniture', id), size = getFurnitureSize(item);
       plan.furniture.push({ ...old, id, category: exportedFurnitureCategory(item), center: point(item.position, 0.01), angle: item.rotation * Math.PI / 180, width: meters(size.width || 1), depth: meters(size.depth || 1), height: size.height > 0 ? meters(size.height) : undefined, mirrorX: item.scale.x < 0, mirrorY: item.scale.y < 0, level });
     }
@@ -271,7 +293,9 @@ export function webToNative(project: Project, original: ObjectMap | undefined, p
   }
   for (const entry of mapping) if (entry.kind !== 'levels' && entry.kind !== 'textAnnotations') {
     const kind = entry.kind as DetailKind;
-    const item = project.floors.find(f => f.id === entry.floorId)?.[kind].find(i => i.id === entry.webId);
+    const item = kind === 'furniture'
+      ? project.layouts.find(layout => layout.id === project.activeLayoutId)?.furnitureByFloor[entry.floorId]?.find(i => i.id === entry.webId)
+      : project.floors.find(f => f.id === entry.floorId)?.[kind].find(i => i.id === entry.webId);
     const nativeKind = kind === 'doors' || kind === 'windows' ? 'openings' : kind;
     withNativeDetails(plan[nativeKind].find((i: any) => i.id === entry.id), item?.details, kind);
   }

@@ -15,6 +15,7 @@ export type PackageMapping = { id: string; kind: string; webId: string; floorId?
 export interface ProjectPackageState {
   version: 1;
   furnitureCategoriesVersion?: 1;
+  projectedLayoutId?: string;
   native: Record<string, any>;
   mapping: PackageMapping;
   assets: Record<string, string>; // assets/<filename> → base64 bytes, one copy per file

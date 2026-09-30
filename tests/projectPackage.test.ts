@@ -27,12 +27,14 @@ function webFixture() {
   project.id = 'qa-project-package-web'; project.name = 'QA Web Package';
   const floor = project.floors[0]; floor.elevation = 47.25;
   floor.walls[0].startHeight = 273.5; floor.walls[0].endHeight = 123.75; floor.walls[0].texture = 'future-texture';
-  floor.furniture = [{ id: 'chair-short-id', catalogId: 'chair', position: { x: 100.5, y: 120.25 }, width: 65, depth: 55, height: 91, rotation: 37.5, scale: { x: -2, y: 1.5, z: 1 }, future: 'furniture extension' }];
+  project.layouts[0].furnitureByFloor[floor.id] = [{ id: 'chair-short-id', catalogId: 'chair', position: { x: 100.5, y: 120.25 }, width: 65, depth: 55, height: 91, rotation: 37.5, scale: { x: -2, y: 1.5, z: 1 }, future: 'furniture extension' }];
   floor.textAnnotations = [{ id: 'note-short-id', text: 'Web note', x: 200, y: 100, fontSize: 18, color: '#123456', rotation: 12 }];
   floor.backgroundImage = { dataUrl: `data:image/png;base64,${Buffer.from(pixel).toString('base64')}`, position: { x: 120, y: 90 }, scale: 600, rotation: 0, opacity: 0.25, locked: false };
   project.vendor = { preserve: ['all', 'web', 'extensions'] };
   return project;
 }
+const furniture = (project: any, floor = project.floors[0]) => project.layouts.find((layout: any) => layout.id === project.activeLayoutId)?.furnitureByFloor[floor.id] ?? [];
+const setFurniture = (project: any, floor: any, items: any[]) => { project.layouts.find((layout: any) => layout.id === project.activeLayoutId).furnitureByFloor[floor.id] = items; };
 beforeEach(() => { mockStorage(); });
 
 it('projects measured native furniture height and preserves legacy omission', () => {
@@ -40,24 +42,24 @@ it('projects measured native furniture height and preserves legacy omission', ()
   plan.furniture[0].height = 2.137;
   files['plan.json'] = jsonBytes(plan);
   const project = readProjectPackage(writePackageZip(files)).project;
-  expect(project.floors[0].furniture[0].height).toBeCloseTo(213.7, 10);
+  expect(furniture(project)[0].height).toBeCloseTo(213.7, 10);
   const returned = packageJSON(readPackageZip(projectPackageBytes(project))['plan.json']);
   expect(returned.furniture[0].height).toBeCloseTo(2.137, 10);
   const legacy = readProjectPackage(writePackageZip(nativeFiles())).project;
-  expect(legacy.floors[0].furniture[0].height).toBeUndefined();
+  expect(furniture(legacy)[0].height).toBeUndefined();
   expect(packageJSON(readPackageZip(projectPackageBytes(legacy))['plan.json']).furniture[0].height).toBeUndefined();
 });
 
 it('merges native height edits without flattening web vertical scale', () => {
   const source = webFixture();
-  source.floors[0].furniture[0].scale.z = 2.5;
+  furniture(source)[0].scale.z = 2.5;
   const files = readPackageZip(projectPackageBytes(source));
   const plan = packageJSON(files['plan.json']);
   expect(plan.furniture[0].height).toBeCloseTo(2.275, 10);
   plan.furniture[0].height = 3.125;
   files['plan.json'] = jsonBytes(plan);
   const project = readProjectPackage(writePackageZip(files)).project;
-  expect(project.floors[0].furniture[0]).toMatchObject({ height: 125, scale: { x: -2, y: 1.5, z: 2.5 }, rotation: 37.5 });
+  expect(furniture(project)[0]).toMatchObject({ height: 125, scale: { x: -2, y: 1.5, z: 2.5 }, rotation: 37.5 });
   const returned = projectPackageBytes(project);
   expect(packageJSON(readPackageZip(returned)['plan.json']).furniture[0].height).toBeCloseTo(3.125, 10);
   if (process.env.OPENPLAN_HEIGHT_RETURN_PATH) writeFileSync(process.env.OPENPLAN_HEIGHT_RETURN_PATH, returned);
@@ -70,8 +72,8 @@ it('returns measured height and web scale from an actual native UI package expor
   expect(nativePlan.furniture[0]).toMatchObject({ height: 3.125, mirrorX: true, mirrorY: false });
   const retainedWeb = packageJSON(files['web.json']);
   const project = readProjectPackage(bytes).project;
-  expect(project.floors[0].furniture).toEqual(retainedWeb.floors[0].furniture);
-  expect(project.floors[0].furniture[0]).toMatchObject({
+  expect(furniture(project)).toEqual(retainedWeb.floors[0].furniture);
+  expect(furniture(project)[0]).toMatchObject({
     height: 125, width: 65, depth: 55, rotation: 37.5,
     scale: { x: -2, y: 1.5, z: 2.5 }, future: 'furniture extension',
   });
@@ -87,7 +89,7 @@ it('imports actual native UI height edits and category reset without changing le
   const bytes = new Uint8Array(readFileSync('tests/fixtures/native-ui-edited-heights-package.zip'));
   const original = packageJSON(readPackageZip(bytes)['plan.json']);
   const project = readProjectPackage(bytes).project;
-  const chairs = project.floors[0].furniture.filter(item => item.catalogId === 'chair');
+  const chairs = furniture(project).filter((item: any) => item.catalogId === 'chair');
   expect(chairs).toHaveLength(2);
   expect(chairs[0].height).toBeCloseTo(100 * 1.2318993347743592, 8);
   expect(chairs[1].height).toBe(90);
@@ -99,21 +101,20 @@ it('imports actual native UI height edits and category reset without changing le
 
 it('retains web height when an older native encoder omits it', () => {
   const source = webFixture();
-  source.floors[0].furniture[0].scale.z = 2.5;
+  furniture(source)[0].scale.z = 2.5;
   const files = readPackageZip(projectPackageBytes(source)), plan = packageJSON(files['plan.json']);
   delete plan.furniture[0].height;
   files['plan.json'] = jsonBytes(plan);
-  expect(readProjectPackage(writePackageZip(files)).project.floors[0].furniture[0])
-    .toEqual(source.floors[0].furniture[0]);
+  expect(furniture(readProjectPackage(writePackageZip(files)).project)[0]).toEqual(furniture(source)[0]);
 });
 
 it('retains flat catalog symbols without emitting invalid native dimensions', () => {
   const source = webFixture();
-  source.floors[0].furniture[0].catalogId = 'sym_ceiling_fan';
-  delete source.floors[0].furniture[0].height;
+  furniture(source)[0].catalogId = 'sym_ceiling_fan';
+  delete furniture(source)[0].height;
   const bytes = projectPackageBytes(source);
   expect(packageJSON(readPackageZip(bytes)['plan.json']).furniture[0].height).toBeUndefined();
-  expect(readProjectPackage(bytes).project.floors[0].furniture[0]).toEqual(source.floors[0].furniture[0]);
+  expect(furniture(readProjectPackage(bytes).project)[0]).toEqual(furniture(source)[0]);
 });
 
 it('imports and returns the actual native UI reflected refrigerator package', () => {
@@ -122,17 +123,17 @@ it('imports and returns the actual native UI reflected refrigerator package', ()
   expect(original.furniture).toHaveLength(1);
   expect(original.furniture[0]).toMatchObject({ category: 'refrigerator', mirrorX: true, angle: Math.PI / 12 });
   const project = readProjectPackage(bytes).project;
-  expect(project.floors[0].furniture).toHaveLength(1);
-  expect(project.floors[0].furniture[0]).toMatchObject({
+  expect(furniture(project)).toHaveLength(1);
+  expect(furniture(project)[0]).toMatchObject({
     catalogId: 'fridge', width: 70, depth: 70,
     position: { x: 250, y: 200 }, scale: { x: -1, y: 1, z: 1 },
   });
-  expect(project.floors[0].furniture[0].rotation).toBeCloseTo(15, 10);
+  expect(furniture(project)[0].rotation).toBeCloseTo(15, 10);
   const returnedBytes = projectPackageBytes(project);
   const returned = packageJSON(readPackageZip(returnedBytes)['plan.json']);
   const normalized = (items: any[]) => items.map(item => ({ ...item, id: item.id.toLowerCase() }));
   expect(normalized(returned.furniture)).toEqual(normalized(original.furniture));
-  expect(readProjectPackage(projectPackageBytes(project)).project.floors[0].furniture[0].scale)
+  expect(furniture(readProjectPackage(projectPackageBytes(project)).project)[0].scale)
     .toEqual({ x: -1, y: 1, z: 1 });
   if (process.env.OPENPLAN_REFLECTION_RETURN_PATH) writeFileSync(process.env.OPENPLAN_REFLECTION_RETURN_PATH, returnedBytes);
 });
@@ -147,7 +148,7 @@ it('merges native reflection edits without flattening web scale or changing rota
   plan.furniture[0].width = 1.8;
   files['plan.json'] = jsonBytes(plan);
   const result = readProjectPackage(writePackageZip(files)).project;
-  expect(result.floors[0].furniture[0]).toMatchObject({
+  expect(furniture(result)[0]).toMatchObject({
     rotation: 37.5, width: 90, depth: 55, scale: { x: 2, y: -1.5, z: 1 },
     future: 'furniture extension',
   });
@@ -162,8 +163,9 @@ it('retains reflection when an older native app drops optional reflection fields
   delete plan.furniture[0].mirrorX; delete plan.furniture[0].mirrorY;
   plan.furniture[0].note = 'Edited in an older app';
   files['plan.json'] = jsonBytes(plan);
-  const item = readProjectPackage(writePackageZip(files)).project.floors[0].furniture[0];
-  expect(item.scale).toEqual(source.floors[0].furniture[0].scale);
+  const returned = readProjectPackage(writePackageZip(files)).project;
+  const item = furniture(returned)[0];
+  expect(item.scale).toEqual(furniture(source)[0].scale);
   expect(item.details?.note).toBe('Edited in an older app');
 });
 
@@ -171,7 +173,8 @@ it('imports standalone native reflection and rejects non-boolean reflection flag
   const files = nativeFiles(), plan = packageJSON(files['plan.json']);
   plan.furniture[0].mirrorX = true; plan.furniture[0].mirrorY = true;
   files['plan.json'] = jsonBytes(plan);
-  const item = readProjectPackage(writePackageZip(files)).project.floors.flatMap(f => f.furniture)[0];
+  const imported = readProjectPackage(writePackageZip(files)).project;
+  const item = imported.layouts.flatMap(layout => Object.values(layout.furnitureByFloor).flat())[0];
   expect(item.scale).toEqual({ x: -1, y: -1, z: 1 });
   plan.furniture[0].mirrorX = 'true';
   expect(() => validatePackagePlan(plan)).toThrow();
@@ -221,6 +224,29 @@ it('unchanged web → native → web preserves richer web fields and short IDs e
   expect(imported).toEqual(source);
   expect(packageJSON(files['plan.json']).walls[0].id).toMatch(/^[\da-f-]{36}$/i);
 });
+it('round-trips every Layout while native edits update only the projected Layout', () => {
+  const source = webFixture(), floorId = source.floors[0].id;
+  source.layouts.push({ id: 'alternate', name: 'Alternate', furnitureByFloor: {
+    [floorId]: [{ id: 'alternate-chair', catalogId: 'chair', position: { x: 700, y: 800 }, width: 80, depth: 70, rotation: 0, scale: { x: 1, y: 1, z: 1 } }],
+  } });
+  source.activeLayoutId = 'alternate';
+  const files = readPackageZip(projectPackageBytes(source)), plan = packageJSON(files['plan.json']);
+  expect(plan.furniture).toHaveLength(1);
+  expect(packageJSON(files['mapping.json']).entries.find((entry: any) => entry.id === plan.furniture[0].id).webId).toBe('alternate-chair');
+  const web = packageJSON(files['web.json']);
+  expect(web.layouts).toEqual(source.layouts);
+  expect(packageJSON(files['baseline.json']).openplanProjectedLayoutId).toBe('alternate');
+  web.activeLayoutId = 'layout-default';
+  files['web.json'] = jsonBytes(web);
+  plan.furniture[0].center = { x: 8, y: 9 };
+  files['plan.json'] = jsonBytes(plan);
+  const returned = readProjectPackage(writePackageZip(files)).project;
+  expect(returned.activeLayoutId).toBe('layout-default');
+  expect(returned.projectPackage!.projectedLayoutId).toBe('alternate');
+  expect(returned.layouts[0].furnitureByFloor[floorId]).toEqual(source.layouts[0].furnitureByFloor[floorId]);
+  expect(returned.layouts[1].furnitureByFloor[floorId][0].position).toEqual({ x: 800, y: 900 });
+  expect(returned.floors[0]).not.toHaveProperty('furniture');
+});
 it('applies native geometry edits and retains sloped walls until the height changes', () => {
   const source = webFixture(), files = readPackageZip(projectPackageBytes(source)), plan = packageJSON(files['plan.json']);
   plan.walls[0].thickness = 0.3725;
@@ -229,8 +255,8 @@ it('applies native geometry edits and retains sloped walls until the height chan
   files['plan.json'] = jsonBytes(plan);
   const result = readProjectPackage(writePackageZip(files)).project;
   expect(result.floors[0].walls[0]).toMatchObject({ thickness: 37.25, startHeight: 273.5, endHeight: 123.75 });
-  expect(result.floors[0].furniture[0]).toMatchObject({ width: 78.75, scale: { x: -2, y: 1.5, z: 1 } });
-  expect(result.floors[0].furniture[0].rotation).toBeCloseTo(60, 10);
+  expect(furniture(result)[0]).toMatchObject({ width: 78.75, scale: { x: -2, y: 1.5, z: 1 } });
+  expect(furniture(result)[0].rotation).toBeCloseTo(60, 10);
   expect(result.floors[0].textAnnotations[0].text).toBe('Updated on iPhone');
   plan.walls[0].height = 2.875; files['plan.json'] = jsonBytes(plan);
   expect(readProjectPackage(writePackageZip(files)).project.floors[0].walls[0]).toMatchObject({ height: 287.5, startHeight: 287.5, endHeight: 287.5 });
@@ -251,7 +277,7 @@ it('preserves web-only fields while applying native element additions and deleti
   plan.furniture.push({ id: '10000000-0000-4000-8000-000000000099', category: 'table', center: { x: 2, y: 3 }, angle: 0, width: 1, depth: 1, level: 0 });
   files['plan.json'] = jsonBytes(plan);
   const after: any = readProjectPackage(writePackageZip(files)).project;
-  expect(after.floors[0].textAnnotations).toEqual([]); expect(after.floors[0].furniture).toHaveLength(2);
+  expect(after.floors[0].textAnnotations).toEqual([]); expect(furniture(after)).toHaveLength(2);
   expect(after.vendor).toEqual(source.vendor); expect(after.floors[0].elevation).toBe(47.25);
 });
 it('updates tracing-image placement without resetting web opacity and locking', () => {
@@ -263,7 +289,7 @@ it('updates tracing-image placement without resetting web opacity and locking', 
 it('reads actual Swift import/edit/export output and preserves the original web representation', () => {
   const result: any = readProjectPackage(new Uint8Array(readFileSync('tests/fixtures/swift-return-project-package.zip'))).project;
   expect(result.floors[0].walls[0]).toMatchObject({ thickness: 37.25, startHeight: 273.5, endHeight: 123.75, texture: 'future-texture' });
-  expect(result.floors[0].furniture[0]).toMatchObject({ width: 78.75, scale: { x: -2, y: 1.5, z: 1 }, future: 'furniture extension' });
+  expect(furniture(result)[0]).toMatchObject({ width: 78.75, scale: { x: -2, y: 1.5, z: 1 }, future: 'furniture extension' });
   expect(result.floors[0].textAnnotations[0].text).toBe('Edited in Swift');
   expect(result.floors[0].elevation).toBe(47.25);
   expect(result.vendor).toEqual({ preserve: ['all', 'web', 'extensions'] });
@@ -273,7 +299,7 @@ it('keeps object metadata and identities when native edits move an object to ano
   const files = readPackageZip(projectPackageBytes(project)), plan = packageJSON(files['plan.json']);
   plan.furniture[0].level = 2; files['plan.json'] = jsonBytes(plan);
   const result = readProjectPackage(writePackageZip(files)).project;
-  expect(result.floors[0].furniture).toHaveLength(0); expect(result.floors[1].furniture).toHaveLength(1);
+  expect(furniture(result, result.floors[0])).toHaveLength(0); expect(furniture(result, result.floors[1])).toHaveLength(1);
   const returned = packageJSON(readPackageZip(projectPackageBytes(result))['plan.json']);
   expect(returned.furniture[0]).toMatchObject({ id: plan.furniture[0].id, level: 2, price: 456.75, note: 'Keep furniture note', photos: ['chair.png'] });
 });
@@ -333,7 +359,7 @@ it('emits shared contract fixtures when explicitly requested', () => {
   writeFileSync(`${process.env.OPENPLAN_PACKAGE_FIXTURES}/native-project-package.zip`, writePackageZip(nativeFiles()));
   writeFileSync(`${process.env.OPENPLAN_PACKAGE_FIXTURES}/web-project-package.zip`, projectPackageBytes(webFixture()));
   const rotated = webFixture(); rotated.name = 'QA Rotated Underlay';
-  rotated.floors[0].furniture = []; rotated.floors[0].textAnnotations = [];
+  setFurniture(rotated, rotated.floors[0], []); rotated.floors[0].textAnnotations = [];
   rotated.floors[0].backgroundImage = { dataUrl: `data:image/png;base64,${readFileSync('tests/fixtures/underlay-orientation.png').toString('base64')}`, position: { x: 300, y: 200 }, scale: 2, rotation: 90, opacity: 0.45, locked: true };
   writeFileSync(`${process.env.OPENPLAN_PACKAGE_FIXTURES}/rotated-underlay-project-package.zip`, projectPackageBytes(rotated));
 });
@@ -393,6 +419,7 @@ it('removing an owned tracing floor removes its native reference while retaining
   const plan = packageJSON(original['plan.json']);
   const project = readProjectPackage(writePackageZip(original)).project;
   project.floors = project.floors.filter(f => f.id !== source.floors[0].id);
+  for (const layout of project.layouts) delete layout.furnitureByFloor[source.floors[0].id];
   project.activeFloorId = project.floors[0].id;
   const returned = readPackageZip(projectPackageBytes(project));
   expect(packageJSON(returned['plan.json']).underlay).toBeUndefined();

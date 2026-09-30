@@ -10,8 +10,10 @@ const mappingKinds = new Set(['levels', 'walls', 'doors', 'windows', 'furniture'
  * source categories before changing anything; ambiguous retained data stays intact.
  * This uses source width for bed presentation, never an edited web footprint.
  * No native geometry, attachment decoding or new project/UUID creation is needed. */
-export function upgradeLegacyFurnitureCategories(project: Project, native: Record<string, any>, mapping: PackageMapping): boolean {
+export function upgradeLegacyFurnitureCategories(project: Project, native: Record<string, any>, mapping: PackageMapping, layoutId = project.activeLayoutId): boolean {
   if (!Array.isArray(native.furniture) || native.furniture.length > 5000 || !Array.isArray(mapping) || mapping.length > 5000) return false;
+  const layout = project.layouts.find(item => item.id === layoutId);
+  if (!layout) return false;
   const sources = new Map<string, { category: string; width: number }>();
   for (const item of native.furniture) {
     if (!item || typeof item.id !== 'string' || !uuid.test(item.id) || sources.has(item.id.toLowerCase()) ||
@@ -20,9 +22,9 @@ export function upgradeLegacyFurnitureCategories(project: Project, native: Recor
   }
   const ids = new Set<string>(), targets = new Set<string>();
   const byId = new Map<string, { floorId: string; item: FurnitureItem }[]>();
-  for (const floor of project.floors) for (const item of floor.furniture) {
+  for (const [floorId, items] of Object.entries(layout.furnitureByFloor)) for (const item of items) {
     const matches = byId.get(item.id) ?? [];
-    matches.push({ floorId: floor.id, item }); byId.set(item.id, matches);
+    matches.push({ floorId, item }); byId.set(item.id, matches);
   }
   const updates: { item: FurnitureItem; category: Pick<FurnitureItem, 'catalogId' | 'sourceCategory'> }[] = [];
   const claimed = new Set<FurnitureItem>();
@@ -60,5 +62,5 @@ export function upgradeLegacyFurnitureCategories(project: Project, native: Recor
 export function refreshLegacyFurnitureCategories(project: Project) {
   const state = project.projectPackage;
   if (!state || state.version !== 1 || state.furnitureCategoriesVersion !== undefined || !state.mapping.some(entry => entry.kind === 'furniture')) return;
-  if (upgradeLegacyFurnitureCategories(project, state.native, state.mapping)) state.furnitureCategoriesVersion = 1;
+  if (upgradeLegacyFurnitureCategories(project, state.native, state.mapping, state.projectedLayoutId ?? project.activeLayoutId)) state.furnitureCategoriesVersion = 1;
 }

@@ -7,7 +7,7 @@ import { prepareLibraryRestore } from './libraryRestore';
 import type { DetailKind } from '$lib/models/types';
 import { upgradeLegacyFurnitureCategories } from '$lib/utils/legacyFurnitureCategories';
 
-type PackageState = { version: 1; furnitureCategoriesVersion?: 1; native: Record<string, any>; mapping: PackageMapping; assets: Record<string, string> };
+type PackageState = { version: 1; furnitureCategoriesVersion?: 1; projectedLayoutId?: string; native: Record<string, any>; mapping: PackageMapping; assets: Record<string, string> };
 const docs = ['manifest.json', 'plan.json', 'web.json', 'baseline.json', 'mapping.json'];
 const reservedAssets = new Set(['plan.json', 'room.json', 'room.usdz', 'session.json', 'manifest.json', 'info.json', 'thumbnail.jpg']);
 function validateLocalImages(project: Project) {
@@ -52,11 +52,11 @@ function readState(project: Project): PackageState | undefined {
   if (state === undefined) return undefined;
   if (!state || state.version !== 1 || !state.assets || typeof state.assets !== 'object' || Array.isArray(state.assets)) packageError('Unrecognized retained package data. Download a JSON backup to preserve it.');
   if (state.furnitureCategoriesVersion !== undefined && state.furnitureCategoriesVersion !== 1) packageError('Unsupported retained furniture-category version.');
-  return { version: 1, furnitureCategoriesVersion: state.furnitureCategoriesVersion, native: validatePackagePlan(state.native), mapping: validatePackageMapping(state.mapping), assets: state.assets };
+  return { version: 1, furnitureCategoriesVersion: state.furnitureCategoriesVersion, projectedLayoutId: state.projectedLayoutId, native: validatePackagePlan(state.native), mapping: validatePackageMapping(state.mapping), assets: state.assets };
 }
 export function projectPackageBytes(value: Project): Uint8Array {
   const project = readProject(value), state = readState(project);
-  if (state && state.furnitureCategoriesVersion === undefined && !upgradeLegacyFurnitureCategories(project, state.native, state.mapping)) {
+  if (state && state.furnitureCategoriesVersion === undefined && !upgradeLegacyFurnitureCategories(project, state.native, state.mapping, state.projectedLayoutId ?? project.activeLayoutId)) {
     packageError('Legacy furniture identities could not be resolved. Download a JSON backup to preserve the retained data.');
   }
   validateLocalImages(project);
@@ -100,7 +100,7 @@ export function projectPackageBytes(value: Project): Uint8Array {
   return writePackageZip({
     'manifest.json': jsonBytes({ format: 'openplan3d-project', version: 1, producer: 'web', title: project.name }),
     'plan.json': jsonBytes(plan), 'web.json': jsonBytes(project),
-    'baseline.json': jsonBytes({ ...planWithoutStatistics, openplanItemDetailsVersion: 1, openplanFurnitureCategoriesVersion: 1, openplanUnderlayFloorId: underlayFloorId, openplanAssetChecksums: Object.fromEntries(Object.entries(assets).map(([path, data]) => [path, crc32(data)])) }),
+    'baseline.json': jsonBytes({ ...planWithoutStatistics, openplanItemDetailsVersion: 1, openplanFurnitureCategoriesVersion: 1, openplanProjectedLayoutId: project.activeLayoutId, openplanUnderlayFloorId: underlayFloorId, openplanAssetChecksums: Object.fromEntries(Object.entries(assets).map(([path, data]) => [path, crc32(data)])) }),
     'mapping.json': jsonBytes({ entries: mapping }), ...assets,
   });
 }
@@ -120,21 +120,27 @@ export function readProjectPackage(bytes: Uint8Array): { project: Project; asset
     validateLocalImages(source);
     if ((source as any).projectPackage !== undefined) packageError('Nested project packages are not supported.');
     const baseline = validatePackagePlan(packageJSON(files['baseline.json']));
+    const projectedLayoutId = baseline.openplanProjectedLayoutId ?? source.activeLayoutId;
+    if (typeof projectedLayoutId !== 'string' || !source.layouts.some(layout => layout.id === projectedLayoutId)) packageError('The package Layout projection is invalid.');
     if (baseline.openplanItemDetailsVersion !== undefined && baseline.openplanItemDetailsVersion !== 1) packageError('Unsupported item-details baseline version.');
     if (baseline.openplanFurnitureCategoriesVersion !== undefined && baseline.openplanFurnitureCategoriesVersion !== 1) packageError('Unsupported furniture-category baseline version.');
     const before = nativeToWeb(baseline, mapping, manifest.title), after = nativeToWeb(plan, mapping, manifest.title, baseline);
-    if (baseline.openplanFurnitureCategoriesVersion === undefined && !upgradeLegacyFurnitureCategories(source, baseline, mapping)) {
+    if (baseline.openplanFurnitureCategoriesVersion === undefined && !upgradeLegacyFurnitureCategories(source, baseline, mapping, projectedLayoutId)) {
       packageError('Legacy furniture identities could not be resolved. Keep the original package for recovery.');
     }
-    project = applyNativeEdits(source, before, after);
+    project = applyNativeEdits(source, before, after, projectedLayoutId);
     // Older web releases retain unknown detail fields but cannot apply native
     // metadata edits to them. Their baseline has no detail-version marker, so
     // the current native plan is authoritative for the newly shared fields.
     if (baseline.openplanItemDetailsVersion !== 1) for (const floor of after.floors) {
       const target = project.floors.find(f => f.id === floor.id);
       if (!target) continue;
-      for (const kind of ['walls', 'doors', 'windows', 'furniture', 'rooms'] as DetailKind[]) for (const item of floor[kind]) {
-        const found = target[kind].find(i => i.id === item.id);
+      for (const kind of ['walls', 'doors', 'windows', 'furniture', 'rooms'] as DetailKind[]) for (const item of kind === 'furniture'
+        ? project.layouts.find(layout => layout.id === projectedLayoutId)?.furnitureByFloor[floor.id] ?? []
+        : floor[kind]) {
+        const found = kind === 'furniture'
+          ? project.layouts.find(layout => layout.id === projectedLayoutId)?.furnitureByFloor[target.id]?.find(i => i.id === item.id)
+          : target[kind].find(i => i.id === item.id);
         if (found) found.details = { ...found.details, ...item.details };
       }
     }
@@ -162,7 +168,7 @@ export function readProjectPackage(bytes: Uint8Array): { project: Project; asset
   // Rebuild identities for the current native plan, retaining source web IDs.
   const resolved = webToNative(project, plan, mapping);
   for (const filename of nativeAssetNames(resolved.plan)) if (!assets[`assets/${filename}`]) packageError(`Missing attachment: ${filename}.`);
-  (project as any).projectPackage = { version: 1, furnitureCategoriesVersion: 1, native: plan, mapping: resolved.mapping, assets: Object.fromEntries(Object.entries(assets).map(([name, data]) => [name, encode64(data)])) } satisfies PackageState;
+  (project as any).projectPackage = { version: 1, furnitureCategoriesVersion: 1, projectedLayoutId: files['web.json'] ? (packageJSON(files['baseline.json']).openplanProjectedLayoutId ?? project.activeLayoutId) : project.activeLayoutId, native: plan, mapping: resolved.mapping, assets: Object.fromEntries(Object.entries(assets).map(([name, data]) => [name, encode64(data)])) } satisfies PackageState;
   return { project: readProject(project), assets: Object.keys(assets).length, warnings: [PACKAGE_NOTICE, ...(plan.underlay && !underlayBackground(plan, assets) ? ['The tracing image format is retained for iPhone but cannot be previewed here.'] : [])] };
 }
 export async function prepareProjectPackage(file: File) {

@@ -70,10 +70,10 @@ it('removal during decoding closes the late bitmap and cannot revive a disposed 
   expect(loaded).not.toHaveBeenCalled(); expect(model.children).toEqual(children);
 });
 it('invalidates rendered definitions without serializing retained source bytes', () => {
-  const value = project(), signature = sceneSignature(value, value.floors[0], false, 'metric');
+  const value = project(), floor = { ...value.floors[0], furniture: value.layouts[0].furnitureByFloor[value.floors[0].id] ?? [] }, signature = sceneSignature(value, floor, false, 'metric');
   expect(signature).not.toContain(bytes.toString('base64'));
   value.customModels![0].sha256 = '0'.repeat(64);
-  expect(sceneSignature(value, value.floors[0], false, 'metric')).not.toBe(signature);
+  expect(sceneSignature(value, floor, false, 'metric')).not.toBe(signature);
 });
 
 it('uses definition dimensions when saved furniture omits size overrides', async () => {
